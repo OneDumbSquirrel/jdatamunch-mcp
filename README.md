@@ -494,6 +494,31 @@ All three implement [jMRI](https://github.com/jgravelle/mcp-retrieval-spec) — 
 
 ---
 
+## Works with
+
+jDataMunch plugs into any MCP-compatible agent or IDE. Tested configurations:
+
+| Platform | Config |
+|----------|--------|
+| **Claude Code / Claude Desktop** | Manual config or `mcp.json` |
+| **Cursor / Windsurf** | Manual `mcp.json` |
+| **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** | Add to `~/.hermes/config.yaml` — see [skill](https://github.com/NousResearch/hermes-agent/pull/10413) |
+| **Any MCP client** | stdio: `jdatamunch-mcp` |
+
+<details>
+<summary>Hermes Agent config</summary>
+
+```yaml
+# ~/.hermes/config.yaml
+mcp_servers:
+  jdatamunch:
+    command: "uvx"
+    args: ["jdatamunch-mcp"]
+```
+</details>
+
+---
+
 ## New here?
 
 Start with the [QuickStart guide](QUICKSTART.md) — zero to indexed in three steps.

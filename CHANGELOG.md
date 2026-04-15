@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.8.4] — 2026-04-15
+
+### Documentation
+- **Hermes Agent integration** — added "Works with" section to README with Hermes Agent config example; submitted optional skill PR to [NousResearch/hermes-agent#10413](https://github.com/NousResearch/hermes-agent/pull/10413)
+
 ## [0.8.3] — 2026-04-09
 
 ### New features
