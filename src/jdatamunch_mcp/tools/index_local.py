@@ -24,10 +24,28 @@ from ..storage.token_tracker import record_savings, estimate_savings
 from ..summarizer import summarize_dataset, summarize_column
 
 _TYPE_SAMPLE_ROWS = 10_000  # rows used for preliminary type detection
+_FINGERPRINT_ROWS = 1_000   # C2: rows hashed for content fingerprint
 
 # Adaptive profiling depth (B7)
 _DEPTHS = ("shallow", "standard", "deep")
 _SHALLOW_ROW_CAP = 100_000  # cap rows profiled in 'shallow' mode
+
+
+def _compute_fingerprint(column_names: list, sample_rows: list) -> str:
+    """Content fingerprint independent of filename and path (C2).
+
+    sha256 over: sorted column names + a row-content digest of the first
+    `_FINGERPRINT_ROWS` rows. Two files with the same logical content but
+    different paths/filenames produce the same fingerprint.
+    """
+    import hashlib
+    h = hashlib.sha256()
+    h.update("\n".join(sorted(column_names)).encode("utf-8"))
+    h.update(b"\x00")
+    for row in sample_rows[:_FINGERPRINT_ROWS]:
+        h.update("\x1f".join(str(c) for c in row).encode("utf-8", errors="replace"))
+        h.update(b"\x1e")
+    return "sha256:" + h.hexdigest()
 
 
 def _build_history_snapshot(idx, profiles: list, source_hash: str) -> dict:
@@ -142,13 +160,20 @@ def index_local(
         accs = [_ColAcc(name=col.name, position=col.position) for col in columns]
 
         # Pushdown (B6): if the parser already knows column types (Parquet),
-        # skip the sample-based inference entirely.
+        # skip the sample-based inference entirely. We still pull a small
+        # sample so the fingerprint (C2) can hash row content.
         pushdown_types: Optional[list] = meta.get("column_types")
         if pushdown_types and len(pushdown_types) == len(columns):
             from ..profiler.column_profiler import _TYPE_RANK
             for acc, t in zip(accs, pushdown_types):
                 acc.type_rank = _TYPE_RANK.get(t, 3)
             preliminary_types = list(pushdown_types)
+            # Buffer enough rows for a fingerprint without paying the full
+            # 10k inference cost.
+            for row in row_iter:
+                sample_rows.append(row)
+                if len(sample_rows) >= _FINGERPRINT_ROWS:
+                    break
         else:
             for row in row_iter:
                 sample_rows.append(row)
@@ -158,6 +183,7 @@ def index_local(
             preliminary_types = [_TYPE_FROM_RANK[acc.type_rank] for acc in accs]
 
         column_names = [col.name for col in columns]
+        fingerprint = _compute_fingerprint(column_names, sample_rows)
 
         # --- Phase 2: Create SQLite schema (write to .tmp) ---
         create_table(tmp_sqlite, column_names, preliminary_types)
@@ -187,11 +213,13 @@ def index_local(
         # --- Phase 5: Create SQLite indexes on low-cardinality columns ---
         create_indexes(tmp_sqlite, profiles)
 
-        # --- Phase 6: Generate summaries ---
+        # --- Phase 6: Generate summaries + learn dataset-specific null tokens (C3) ---
         from ..storage.data_store import _profile_to_dict
+        from ..profiler.null_learner import learn_null_tokens
         col_dicts = [_profile_to_dict(prof) for prof in profiles]
         for prof, col_dict in zip(profiles, col_dicts):
             prof.ai_summary = summarize_column(col_dict)
+        learned_nulls = learn_null_tokens(col_dicts)
 
         ds_summary = summarize_dataset(
             dataset_id=dataset_id,
@@ -256,6 +284,8 @@ def index_local(
             encoding=meta.get("encoding", "utf-8"),
             delimiter=meta.get("delimiter") or "",
             dataset_summary=ds_summary,
+            fingerprint=fingerprint,
+            learned_null_tokens=learned_nulls,
         )
 
         # --- Invalidate cached aggregate results (B2) ---
@@ -285,7 +315,7 @@ def index_local(
 
     index_size = store.index_path(dataset_id).stat().st_size
     tokens_saved = estimate_savings(meta.get("file_size", 0), index_size)
-    total_saved = record_savings(tokens_saved, str(store.base_path))
+    total_saved = record_savings(tokens_saved, str(store.base_path), tool="index_local")
 
     type_counts: dict = {}
     for p_ in profiles:

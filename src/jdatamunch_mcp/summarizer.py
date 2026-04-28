@@ -114,6 +114,52 @@ def summarize_column(col: dict) -> str:
 # Dataset-level summary
 # ---------------------------------------------------------------------------
 
+def _classify_domain(columns: list[dict]) -> Optional[str]:
+    """Coarse domain classification (C4): financial / temporal / geo / log / event.
+
+    Heuristic only — driven by column name tokens and semantic types. Returns
+    None when no domain has decisive evidence.
+    """
+    name_tokens: set = set()
+    for c in columns:
+        s = c["name"].lower()
+        for ch in (" ", "-", ".", "/"):
+            s = s.replace(ch, "_")
+        name_tokens.update(t for t in s.split("_") if t)
+    semantic = {c.get("semantic_type") for c in columns if c.get("semantic_type")}
+
+    # Geo: lat/lon either by name or semantic type
+    if "lat" in semantic or "lon" in semantic:
+        return "geo"
+    if {"latitude", "longitude"}.issubset(name_tokens):
+        return "geo"
+    if "zip_us" in semantic or "iso_country" in semantic:
+        return "geo"
+
+    # Financial
+    fin = {"price", "amount", "currency", "cost", "revenue", "profit", "balance",
+           "invoice", "tax", "fee", "salary", "payment", "usd", "eur"}
+    if "iso_currency" in semantic or len(fin & name_tokens) >= 2:
+        return "financial"
+
+    # Log / event
+    log = {"timestamp", "ts", "level", "severity", "logger", "trace", "span",
+           "request_id", "session_id", "user_agent", "status_code"}
+    if len(log & name_tokens) >= 2:
+        return "log"
+
+    # Event
+    event = {"event", "events", "action", "verb", "object", "actor", "occurred"}
+    if "event" in name_tokens or len(event & name_tokens) >= 2:
+        return "event"
+
+    # Temporal — at least one datetime column is present
+    if any(c.get("type") == "datetime" for c in columns):
+        return "temporal"
+
+    return None
+
+
 def _humanize_bytes(n: int) -> str:
     if n < 1024:
         return f"{n} B"
@@ -198,6 +244,10 @@ def summarize_dataset(
 
     quality_line = " ".join(quality_notes)
 
+    # Domain classification (C4)
+    domain = _classify_domain(columns)
+    domain_line = f"Likely domain: {domain}." if domain else ""
+
     # Assemble
-    parts = [opening, type_line, pk_line, temporal_line, quality_line]
+    parts = [opening, type_line, pk_line, temporal_line, domain_line, quality_line]
     return " ".join(p for p in parts if p).strip()

@@ -420,6 +420,149 @@ def query_rows(
     }
 
 
+def _query_aggregate_approx(
+    sqlite_path: Path,
+    schema_columns: list,
+    aggregations: list,
+    filters: Optional[list] = None,
+    sample_size: int = 50_000,
+) -> dict:
+    """Approximate-mode aggregate (C1).
+
+    Streams the column values through HyperLogLog (count_distinct), t-digest
+    (median), or a sampled estimator (sum/avg). Whole-dataset only — group_by
+    / having / order_by are intentionally unsupported in approximate mode.
+    """
+    from ..profiler.hll import HyperLogLog
+    from ..profiler.tdigest import TDigest
+
+    schema_names = [c["name"] for c in schema_columns]
+    where_sql, params = _build_where(filters or [], schema_columns)
+    where_clause = f"WHERE {where_sql}" if where_sql else ""
+
+    out: dict = {}
+    confidence: dict = {}
+
+    with sqlite3.connect(str(sqlite_path)) as conn:
+        conn.execute("PRAGMA query_only=1")
+
+        # Total row count for sampling-based estimators
+        total_row = conn.execute(
+            f"SELECT COUNT(*) FROM rows {where_clause}", params
+        ).fetchone()
+        total_rows = int(total_row[0]) if total_row else 0
+
+        for agg in aggregations:
+            func = (agg.get("function") or "").lower()
+            col = agg.get("column", "*")
+            alias = agg.get("alias", f"{func}_{col}".replace("*", "all").replace(" ", "_"))
+            if col != "*" and col not in schema_names:
+                raise ValueError(f"INVALID_COLUMN: {col!r}")
+
+            qc = "*" if col == "*" else _qcol(col)
+
+            if func == "count":
+                row = conn.execute(
+                    f"SELECT COUNT({qc}) FROM rows {where_clause}", params
+                ).fetchone()
+                out[alias] = int(row[0]) if row else 0
+                confidence[alias] = "exact"
+
+            elif func == "count_distinct":
+                hll = HyperLogLog()
+                cur = conn.execute(
+                    f"SELECT {qc} FROM rows {where_clause} WHERE {qc} IS NOT NULL"
+                    if not where_clause
+                    else f"SELECT {qc} FROM rows {where_clause} AND {qc} IS NOT NULL",
+                    params,
+                )
+                for row in cur:
+                    if row[0] is not None:
+                        hll.add(str(row[0]))
+                out[alias] = hll.estimate()
+                confidence[alias] = "hll_2pct"
+
+            elif func == "median":
+                td = TDigest(delta=200)
+                cur = conn.execute(
+                    f"SELECT {qc} FROM rows {where_clause} WHERE {qc} IS NOT NULL"
+                    if not where_clause
+                    else f"SELECT {qc} FROM rows {where_clause} AND {qc} IS NOT NULL",
+                    params,
+                )
+                for row in cur:
+                    try:
+                        td.add(float(row[0]))
+                    except (TypeError, ValueError):
+                        pass
+                out[alias] = td.quantile(0.5)
+                confidence[alias] = "tdigest_1pct"
+
+            elif func in ("sum", "avg"):
+                # Sample-based estimator
+                if total_rows <= sample_size:
+                    row = conn.execute(
+                        f"SELECT {func.upper()}({qc}) FROM rows {where_clause}",
+                        params,
+                    ).fetchone()
+                    out[alias] = row[0] if row else None
+                    confidence[alias] = "exact"
+                else:
+                    cur = conn.execute(
+                        f"SELECT {qc} FROM rows {where_clause} ORDER BY RANDOM() LIMIT ?"
+                        if not where_clause
+                        else f"SELECT {qc} FROM rows {where_clause} ORDER BY RANDOM() LIMIT ?",
+                        params + [sample_size],
+                    )
+                    vals = [v[0] for v in cur if v[0] is not None]
+                    n = len(vals)
+                    if n == 0:
+                        out[alias] = None
+                        confidence[alias] = "no_data"
+                    else:
+                        try:
+                            mean = sum(float(v) for v in vals) / n
+                            if func == "avg":
+                                out[alias] = mean
+                            else:
+                                out[alias] = mean * total_rows
+                            # 95% CI half-width via standard error
+                            if n >= 2:
+                                m2 = sum((float(v) - mean) ** 2 for v in vals) / (n - 1)
+                                se = (m2 / n) ** 0.5
+                                ci95 = 1.96 * se
+                                if func == "sum":
+                                    ci95 *= total_rows
+                                confidence[alias] = {
+                                    "method": f"sampled_{n}",
+                                    "ci95_halfwidth": round(ci95, 6),
+                                }
+                            else:
+                                confidence[alias] = {"method": f"sampled_{n}"}
+                        except (TypeError, ValueError):
+                            out[alias] = None
+                            confidence[alias] = "type_error"
+
+            elif func in ("min", "max"):
+                row = conn.execute(
+                    f"SELECT {func.upper()}({qc}) FROM rows {where_clause}", params
+                ).fetchone()
+                out[alias] = row[0] if row else None
+                confidence[alias] = "exact"
+
+            else:
+                raise ValueError(f"INVALID_FILTER: unknown aggregation function {func!r}")
+
+    return {
+        "groups": [out] if out else [],
+        "total_groups": 1 if out else 0,
+        "returned": 1 if out else 0,
+        "approximate": True,
+        "confidence": confidence,
+        "total_rows_scanned": total_rows,
+    }
+
+
 def query_aggregate(
     sqlite_path: Path,
     schema_columns: list,
@@ -430,15 +573,31 @@ def query_aggregate(
     order_by: Optional[str] = None,
     order_dir: str = "desc",
     limit: int = 50,
+    approximate: bool = False,
 ) -> dict:
     """Execute a GROUP BY aggregation query.
 
     aggregations: list of {"column": ..., "function": ..., "alias": ...}
     having: list of filter dicts whose `column` references an aggregation alias.
             Same op set as filters: eq, neq, gt, gte, lt, lte, in, between (B11).
+    approximate: when True, route count_distinct → HLL, median → t-digest,
+                 sum/avg → sampled estimator with 95% CI (C1). Whole-dataset
+                 only — group_by / having / order_by are not supported.
     """
     if not aggregations:
         raise ValueError("INVALID_FILTER: aggregations is required")
+
+    if approximate:
+        if group_by or having or order_by:
+            raise ValueError(
+                "INVALID_FILTER: approximate=True does not support group_by/having/order_by"
+            )
+        return _query_aggregate_approx(
+            sqlite_path=sqlite_path,
+            schema_columns=schema_columns,
+            aggregations=aggregations,
+            filters=filters,
+        )
 
     schema_names = [c["name"] for c in schema_columns]
     VALID_FUNCS = {"count", "sum", "avg", "min", "max", "count_distinct", "median"}

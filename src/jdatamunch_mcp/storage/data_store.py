@@ -44,6 +44,8 @@ class DataIndex:
     columns: list            # list of column profile dicts (serialized ColumnProfile)
     sqlite_relative_path: str = "data.sqlite"
     dataset_summary: Optional[str] = None
+    fingerprint: Optional[str] = None  # C2: content fingerprint independent of filename/path
+    learned_null_tokens: list = field(default_factory=list)  # C3: detected sentinel-like tokens
 
 
 def _hash_file(path: str) -> str:
@@ -112,6 +114,8 @@ def _index_to_dict(idx: DataIndex) -> dict:
         "columns": idx.columns,  # already dicts
         "sqlite_relative_path": idx.sqlite_relative_path,
         "dataset_summary": idx.dataset_summary,
+        "fingerprint": idx.fingerprint,
+        "learned_null_tokens": idx.learned_null_tokens,
     }
 
 
@@ -131,6 +135,8 @@ def _index_from_dict(d: dict) -> DataIndex:
         columns=d.get("columns", []),
         sqlite_relative_path=d.get("sqlite_relative_path", "data.sqlite"),
         dataset_summary=d.get("dataset_summary"),
+        fingerprint=d.get("fingerprint"),
+        learned_null_tokens=d.get("learned_null_tokens", []),
     )
 
 
@@ -223,6 +229,8 @@ class DataStore:
         encoding: str,
         delimiter: str,
         dataset_summary: Optional[str] = None,
+        fingerprint: Optional[str] = None,
+        learned_null_tokens: Optional[list] = None,
     ) -> DataIndex:
         """Build and persist a DataIndex from profiling results."""
         source_hash = _hash_file(source_path)
@@ -244,6 +252,8 @@ class DataStore:
             delimiter=delimiter,
             columns=column_dicts,
             dataset_summary=dataset_summary,
+            fingerprint=fingerprint,
+            learned_null_tokens=learned_null_tokens or [],
         )
 
         dir_ = self.dataset_dir(dataset_id)
@@ -353,6 +363,7 @@ class DataStore:
                     "columns": d["column_count"],
                     "size_bytes": d["source_size_bytes"],
                     "source_format": d.get("source_format", "csv"),
+                    "fingerprint": d.get("fingerprint"),
                     "indexed_at": d["indexed_at"],
                 })
             except Exception:

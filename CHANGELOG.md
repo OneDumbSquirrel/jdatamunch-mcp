@@ -1,5 +1,58 @@
 # Changelog
 
+## [1.4.0] — Phase C (optional post-V1 polish)
+
+Closes the Phase C list in `todo.md`. 317 tests passing. Fully backward-compatible.
+
+### Aggregation
+- **`aggregate(approximate=True)`** (C1) — new approximate-mode path. Routes
+  `count_distinct` → HyperLogLog (~2% standard error), `median` → t-digest
+  (~1% accuracy at extreme quantiles), `sum`/`avg` → sampled estimator with
+  95% confidence-interval half-width reported in `result.confidence`.
+  Whole-dataset only (no group_by/having/order_by). Useful for very large
+  joined datasets where exact aggregations are expensive.
+
+### Index metadata
+- **Dataset content fingerprint** (C2) — `index.json` now carries
+  `fingerprint = sha256(sorted(column_names) + first_1000_row_hash)`.
+  Independent of filename / path: two physically distinct files with
+  identical logical content share the same fingerprint. Surfaced in
+  `list_datasets`.
+- **Per-dataset learned null tokens** (C3) — new `profiler/null_learner.py`
+  scans completed profiles for sentinel-looking tokens that recur across
+  multiple columns at non-trivial frequency (e.g. `TBD`, `999`, `----`,
+  `UNKNOWN`). Surfaced as `index.learned_null_tokens` so agents can decide
+  whether to treat them as nulls in downstream filters. Informational only —
+  profiling behavior is unchanged.
+
+### Summarization
+- **Coarse domain classification** (C4) — `summarize_dataset` now appends a
+  `Likely domain: …` line when evidence supports it: `geo`, `financial`,
+  `log`, `event`, or `temporal`. Driven by column-name tokens + semantic
+  types. Conservative — emits nothing when evidence is weak.
+
+### Telemetry
+- **Per-tool token-savings attribution** (C5) — `_savings.json` now records
+  `per_tool[<tool>] = {tokens_saved, calls}`. Surfaced via
+  `get_session_stats.result.per_tool` sorted by tokens saved descending.
+  Lets you see which tools contribute most to the savings number.
+
+### Cache
+- **Cross-session aggregate cache** (C6) — formalized: the result cache
+  shipped in 1.1.0 (`storage/result_cache.py`) already persists across
+  sessions as JSON files under `~/.data-index/{dataset}/_cache/`, keyed on
+  `(tool, source_hash, normalized_args)`. Re-indexing invalidates.
+
+### Migrations
+- **v1 → v2 migration extended** to populate `fingerprint` (None) and
+  `learned_null_tokens` ([]) on legacy indexes. Idempotent. No behavior
+  change for indexes already at v2.
+
+### Tests
+- 16 new tests across `test_fingerprint`, `test_per_tool_savings`,
+  `test_domain_classification`, `test_null_learner`,
+  `test_approximate_aggregate`. Total: **317 passing**.
+
 ## [1.1.0] — Phase B (recommended polish)
 
 Adds the eight Phase-B items from `todo.md`. 301 tests passing. Fully

@@ -243,7 +243,7 @@ def join_datasets(
     response_bytes = len(json.dumps(rows).encode("utf-8"))
     combined_source = (idx_a.source_size_bytes or 0) + (idx_b.source_size_bytes or 0)
     tokens_saved = estimate_savings(combined_source, response_bytes)
-    total_saved = record_savings(tokens_saved, str(store.base_path))
+    total_saved = record_savings(tokens_saved, str(store.base_path), tool="join_datasets")
 
     return {
         "result": {

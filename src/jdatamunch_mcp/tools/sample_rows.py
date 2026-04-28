@@ -72,7 +72,7 @@ def sample_rows(
 
     response_bytes = len(json.dumps(rows).encode("utf-8"))
     tokens_saved = estimate_savings(idx.source_size_bytes, response_bytes)
-    total_saved = record_savings(tokens_saved, str(store.base_path))
+    total_saved = record_savings(tokens_saved, str(store.base_path), tool="sample_rows")
 
     result_body: dict = {
         "rows": rows,

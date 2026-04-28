@@ -51,8 +51,19 @@ def _share_savings(delta: int, anon_id: str) -> None:
     threading.Thread(target=_post, daemon=True).start()
 
 
-def record_savings(tokens_saved: int, base_path: Optional[str] = None) -> int:
-    """Add tokens_saved to the running total. Returns new cumulative total."""
+def record_savings(
+    tokens_saved: int,
+    base_path: Optional[str] = None,
+    tool: Optional[str] = None,
+) -> int:
+    """Add tokens_saved to the running total (and to the per-tool breakdown).
+
+    Returns the new cumulative total.
+
+    `tool` (C5): when provided, also increments
+    `data["per_tool"][tool] = {"tokens_saved": int, "calls": int}` so callers
+    can see which tool contributes most to the savings number.
+    """
     path = _savings_path(base_path)
     with _SAVINGS_LOCK:
         try:
@@ -64,6 +75,12 @@ def record_savings(tokens_saved: int, base_path: Optional[str] = None) -> int:
         total = data.get("total_tokens_saved", 0) + delta
         data["total_tokens_saved"] = total
 
+        if tool:
+            per_tool = data.setdefault("per_tool", {})
+            entry = per_tool.setdefault(tool, {"tokens_saved": 0, "calls": 0})
+            entry["tokens_saved"] += delta
+            entry["calls"] += 1
+
         if delta > 0 and os.environ.get("JDATAMUNCH_SHARE_SAVINGS", "1") != "0":
             anon_id = _get_or_create_anon_id(data)
             _share_savings(delta, anon_id)
@@ -74,6 +91,15 @@ def record_savings(tokens_saved: int, base_path: Optional[str] = None) -> int:
             pass
 
     return total
+
+
+def get_per_tool_savings(base_path: Optional[str] = None) -> dict:
+    """Return the per-tool breakdown (C5)."""
+    path = _savings_path(base_path)
+    try:
+        return json.loads(path.read_text()).get("per_tool", {})
+    except Exception:
+        return {}
 
 
 def get_total_saved(base_path: Optional[str] = None) -> int:

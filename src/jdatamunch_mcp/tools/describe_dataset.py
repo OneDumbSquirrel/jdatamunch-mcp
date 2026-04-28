@@ -86,7 +86,7 @@ def describe_dataset(
     # Token savings: raw file vs this response
     response_bytes = len(json.dumps(col_summaries).encode("utf-8"))
     tokens_saved = estimate_savings(idx.source_size_bytes, response_bytes)
-    total_saved = record_savings(tokens_saved, str(store.base_path))
+    total_saved = record_savings(tokens_saved, str(store.base_path), tool="describe_dataset")
 
     result_body: dict = {
         "dataset": idx.dataset,

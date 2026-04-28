@@ -353,6 +353,11 @@ async def list_tools() -> list[Tool]:
                         "description": "Max groups returned (default 50)",
                         "default": 50,
                     },
+                    "approximate": {
+                        "type": "boolean",
+                        "description": "Approximate-mode aggregation (C1). Routes count_distinct → HyperLogLog (~2% error), median → t-digest (~1% error), sum/avg → sampled estimator with 95% confidence interval. Whole-dataset only.",
+                        "default": False,
+                    },
                 },
                 "required": ["dataset", "aggregations"],
             },
@@ -889,6 +894,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 order_by=arguments.get("order_by"),
                 order_dir=arguments.get("order_dir", "desc"),
                 limit=arguments.get("limit", 50),
+                approximate=arguments.get("approximate", False),
                 storage_path=storage_path,
             )
         elif name == "sample_rows":

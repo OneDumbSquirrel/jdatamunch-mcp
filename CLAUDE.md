@@ -1,11 +1,11 @@
 # jdatamunch-mcp — Project Brief
 
 ## Current State
-- **Version:** 1.1.0 (Phase B complete — see `todo.md` and CHANGELOG `[1.1.0]`)
+- **Version:** 1.4.0 (Phase C complete — full Phase A+B+C roadmap shipped)
 - **GitHub:** `jgravelle/jdatamunch-mcp`
 - **Python:** >=3.10
 - **Index format:** INDEX_VERSION = 2 (v1 → v2 migration registered in `storage/migrations.py`)
-- **Tool count:** 27 (Phase B added `run_sql`, `plan_query`, `get_dataset_health`, `suggest_keys`, `suggest_joins`, `get_distribution`)
+- **Tool count:** 27 (Phase C extends existing tools: `aggregate(approximate=True)`, `list_datasets` exposes `fingerprint`, `get_session_stats` exposes `per_tool`, `summarize_dataset` adds domain classification)
 
 ## Key Files
 ```

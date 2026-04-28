@@ -161,14 +161,16 @@ Shipped in 1.1.0. See CHANGELOG `[1.1.0]`. 301 tests passing.
 
 ---
 
-## Phase C — Optional Post-V1 (1.4.0+)
+## Phase C — Optional Post-V1 (1.4.0+) — COMPLETE ✅
 
-- [ ] **C1.** Approximate aggregate mode (`approximate=True`) with confidence intervals — `count_distinct` via HLL, `median` via t-digest, `sum/avg` sampled.
-- [ ] **C2.** Dataset fingerprint dedup: `sha256(sorted(column_names) + first_1000_row_hash)` exposed in `list_datasets`.
-- [ ] **C3.** Per-dataset learned null tokens (frequency-based detection of dataset-specific null markers).
-- [ ] **C4.** Coarse domain classification in `summarize_dataset` (financial / temporal / geo / log / event).
-- [ ] **C5.** Per-tool token-savings attribution in `_savings.json`.
-- [ ] **C6.** Cross-session aggregate snapshot cache.
+Shipped in 1.4.0. See CHANGELOG `[1.4.0]`. 317 tests passing.
+
+- [x] **C1.** Approximate aggregate mode — `aggregate(approximate=True)`. `count_distinct` via HLL (~2% error), `median` via t-digest, `sum`/`avg` via sampling with 95% CI half-width. Whole-dataset only.
+- [x] **C2.** Dataset content fingerprint — `sha256(sorted(column_names) + first_1000_row_hash)` stored on `index.json` and surfaced in `list_datasets`. Path-independent dedup.
+- [x] **C3.** Per-dataset learned null tokens — `profiler/null_learner.py` detects sentinel-looking tokens (TBD, 999, ----, UNKNOWN, …) recurring across columns. Surfaced as `index.learned_null_tokens`.
+- [x] **C4.** Coarse domain classification — `summarize_dataset` appends `Likely domain: …` (geo / financial / log / event / temporal) when evidence supports it.
+- [x] **C5.** Per-tool token-savings attribution — `_savings.json` tracks `per_tool[<tool>] = {tokens_saved, calls}`. Surfaced in `get_session_stats.result.per_tool`.
+- [x] **C6.** Cross-session aggregate cache — already shipped via B2 `storage/result_cache.py`. Persists across sessions as JSON files; invalidated on re-index.
 
 ---
 

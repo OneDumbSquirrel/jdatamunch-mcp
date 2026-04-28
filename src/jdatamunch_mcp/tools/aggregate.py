@@ -21,6 +21,7 @@ def aggregate(
     order_by: Optional[str] = None,
     order_dir: str = "desc",
     limit: int = 50,
+    approximate: bool = False,
     storage_path: Optional[str] = None,
 ) -> dict:
     """Compute server-side aggregations on a dataset.
@@ -64,6 +65,7 @@ def aggregate(
         "order_by": order_by,
         "order_dir": order_dir,
         "limit": limit,
+        "approximate": approximate,
     }
     cache_key = result_cache.make_key("aggregate", idx.source_hash, cache_args)
     cached = result_cache.get(store.dataset_dir(dataset), cache_key)
@@ -84,13 +86,14 @@ def aggregate(
             order_by=order_by,
             order_dir=order_dir,
             limit=limit,
+            approximate=approximate,
         )
     except ValueError as e:
         return {"error": str(e)}
 
     response_bytes = len(json.dumps(agg_result).encode("utf-8"))
     tokens_saved = estimate_savings(idx.source_size_bytes, response_bytes)
-    total_saved = record_savings(tokens_saved, str(store.base_path))
+    total_saved = record_savings(tokens_saved, str(store.base_path), tool="aggregate")
 
     response = {
         "result": agg_result,

@@ -132,7 +132,7 @@ def get_data_hotspots(
     import json
     response_bytes = len(json.dumps(top).encode("utf-8"))
     tokens_saved = estimate_savings(idx.source_size_bytes, response_bytes)
-    total_saved = record_savings(tokens_saved, str(store.base_path))
+    total_saved = record_savings(tokens_saved, str(store.base_path), tool="get_data_hotspots")
 
     response = {
         "result": {

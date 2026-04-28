@@ -22,6 +22,11 @@ def _migrate_v1_to_v2(d: dict) -> dict:
     All new fields are populated with safe defaults; the migration
     does NOT recompute statistics. Re-index to get accurate values.
     """
+    # Dataset-level fields added in 1.x post-1.0 are optional and default-safe
+    # when missing (legacy indexes load fine).
+    d.setdefault("fingerprint", None)
+    d.setdefault("learned_null_tokens", [])
+
     cols = d.get("columns", [])
     for c in cols:
         c.setdefault("std_dev", None)
