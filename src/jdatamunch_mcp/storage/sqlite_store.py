@@ -57,8 +57,19 @@ def create_table(
     column_names: list,  # list[str]
     column_types: list,  # list[str] — parallel to column_names
 ) -> None:
-    """Create the rows table (drops if it already exists)."""
+    """Create the rows table (drops if it already exists).
+
+    Writes to a fresh file at sqlite_path. Callers performing crash-safe
+    ingest should pass the .tmp variant and rename on success (A4).
+    """
     sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+    # Crash-safe load: always start from a clean file so a partial run from
+    # a previous attempt cannot leak into the new one.
+    if sqlite_path.exists():
+        try:
+            sqlite_path.unlink()
+        except OSError:
+            pass
     col_defs = ", ".join(
         f"{_qcol(name)} {_TYPE_AFFINITY.get(ctype, 'TEXT')}"
         for name, ctype in zip(column_names, column_types)
@@ -114,10 +125,12 @@ def _make_col_converter(col_type: str):
 class BulkInserter:
     """Context manager for high-throughput row insertion.
 
-    Keeps a single SQLite connection open across all batches, using
-    aggressive PRAGMAs safe for a full rebuild (synchronous=OFF is fine
-    because a failed index is simply discarded and rebuilt on next run).
+    Keeps a single SQLite connection open across all batches.
     Uses pre-compiled per-column converters to avoid repeated type dispatch.
+
+    Crash safety (A4): the caller writes to data.sqlite.tmp and renames on
+    success. WAL + synchronous=NORMAL keep durability cost low while
+    guaranteeing no torn pages survive a kill.
     """
 
     def __init__(
@@ -141,10 +154,10 @@ class BulkInserter:
 
     def __enter__(self) -> "BulkInserter":
         self._conn = sqlite3.connect(str(self.sqlite_path))
-        # Speed-optimised PRAGMAs for bulk load. WAL is kept (set by create_table);
-        # synchronous=OFF is safe here because a failed index is just rebuilt.
+        # WAL + synchronous=NORMAL: durable enough that a kill mid-load
+        # leaves either a complete batch or a recoverable journal (A4).
         self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=OFF")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA cache_size=-131072")   # 128 MB page cache
         self._conn.execute("PRAGMA temp_store=MEMORY")
         return self
@@ -473,8 +486,15 @@ def query_sample(
     n: int = 5,
     method: str = "head",
     columns: Optional[list] = None,
+    seed: Optional[int] = None,
 ) -> list:
-    """Return a sample of rows: head, tail, or random."""
+    """Return a sample of rows: head, tail, or random.
+
+    When method='random', `seed` makes the result deterministic (A9).
+    Implementation: sample uniformly without replacement from rowid 1..N
+    using a seeded random.Random instance, then SELECT … WHERE rowid IN (…).
+    Falls back to ORDER BY RANDOM() when seed is None for backward compat.
+    """
     n = min(max(1, n), 100)
     schema_names = [c["name"] for c in schema_columns]
     select_cols = columns if columns else schema_names
@@ -483,24 +503,55 @@ def query_sample(
 
     if method == "head":
         sql = f"SELECT rowid, {col_sql} FROM rows LIMIT ?"
-        params = [n]
+        params: list = [n]
+        with sqlite3.connect(str(sqlite_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only=1")
+            cursor = conn.execute(sql, params)
+            return _materialize_rows(cursor, select_cols)
     elif method == "tail":
         sql = f"SELECT rowid, {col_sql} FROM rows ORDER BY rowid DESC LIMIT ?"
         params = [n]
+        with sqlite3.connect(str(sqlite_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only=1")
+            cursor = conn.execute(sql, params)
+            return _materialize_rows(cursor, select_cols)
     else:  # random
-        sql = f"SELECT rowid, {col_sql} FROM rows ORDER BY RANDOM() LIMIT ?"
-        params = [n]
+        if seed is None:
+            sql = f"SELECT rowid, {col_sql} FROM rows ORDER BY RANDOM() LIMIT ?"
+            params = [n]
+            with sqlite3.connect(str(sqlite_path)) as conn:
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA query_only=1")
+                cursor = conn.execute(sql, params)
+                return _materialize_rows(cursor, select_cols)
+        # Deterministic: pick rowids via seeded RNG, then fetch by rowid.
+        import random
+        with sqlite3.connect(str(sqlite_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only=1")
+            total_row = conn.execute("SELECT COUNT(*) FROM rows").fetchone()
+            total = int(total_row[0]) if total_row else 0
+            if total == 0:
+                return []
+            rng = random.Random(seed)
+            k = min(n, total)
+            picked = rng.sample(range(1, total + 1), k)
+            placeholders = ",".join("?" * len(picked))
+            sql = (
+                f"SELECT rowid, {col_sql} FROM rows "
+                f"WHERE rowid IN ({placeholders})"
+            )
+            cursor = conn.execute(sql, picked)
+            return _materialize_rows(cursor, select_cols)
 
-    with sqlite3.connect(str(sqlite_path)) as conn:
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA query_only=1")
-        cursor = conn.execute(sql, params)
 
-        rows = []
-        for row in cursor:
-            d = {"_row_id": row["rowid"]}
-            for col in select_cols:
-                d[col] = row[col]
-            rows.append(d)
-
+def _materialize_rows(cursor, select_cols: list) -> list:
+    rows = []
+    for row in cursor:
+        d = {"_row_id": row["rowid"]}
+        for col in select_cols:
+            d[col] = row[col]
+        rows.append(d)
     return rows

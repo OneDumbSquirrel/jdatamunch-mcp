@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Generator, Optional
 
+from .normalize import normalize_native
 from .types import ColumnInfo, ParsedDataset
 
 _SCHEMA_SAMPLE_LINES = 100
@@ -56,7 +57,7 @@ def _row_generator(path: str, encoding: str, column_names: list) -> Generator:
             if not isinstance(obj, dict):
                 continue
             yield [
-                str(obj[col]) if col in obj and obj[col] is not None else ""
+                normalize_native(obj.get(col), "jsonl")
                 for col in column_names
             ]
 

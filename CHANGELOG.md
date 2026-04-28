@@ -1,5 +1,74 @@
 # Changelog
 
+## [1.0.0] — Phase A complete (V1 closure)
+
+This release completes the Phase A roadmap that earns a stable 1.x.x. The full
+plan and rationale lives in `todo.md`. Headline guarantees added in this release:
+
+### Statistical correctness
+- **Welford online mean + Neumaier-compensated sum** (A1) — replaces the naive
+  `num_sum += num` accumulator. Mean stays accurate at 1e-9 relative error
+  across 1e-6..1e6 mixed magnitudes.
+- **t-digest streaming quantiles** (A2) — every numeric column now exposes
+  `p01 / p25 / p50 / p75 / p95 / p99` in addition to min/max/mean/median, plus
+  `std_dev` and `variance` from Welford. Bounded ~3 KB/column regardless of
+  row count. Replaces the order-biased 10k reservoir.
+- **HyperLogLog approximate cardinality** (A3) — once the 5,000-distinct
+  exact-count cap is hit, columns now report `cardinality_approx` from a
+  2,048-register HLL (~2% standard error). `cardinality_estimated: true` flags
+  the difference.
+
+### Schema intelligence
+- **Semantic column types** (A6) — 13 detectors (`email`, `url`, `uuid`,
+  `iso_currency`, `phone_e164`, `ipv4`, `ipv6`, `iso_country`, `lat`, `lon`,
+  `zip_us`, `boolean_text`, `percentage`) populate `semantic_type` +
+  `semantic_confidence` on each column profile.
+- **Type-inference confidence + violation samples** (A7) — every column carries
+  `type_confidence` (fraction of values matching the dominant type) and up to
+  five `type_violation_samples` so agents can spot mixed-type columns.
+
+### Crash safety
+- **Atomic ingest** (A4) — `data.sqlite` is written to `data.sqlite.tmp` first
+  and renamed only after profiles compute successfully. `index.json` gets a
+  sidecar `index.json.sha256`. A `_lock` file marks in-progress runs;
+  `index_local` auto-recovers from prior crashes by cleaning stale tmp files.
+  WAL + `synchronous=NORMAL` replace the previous `synchronous=OFF`.
+- **`validate_index` tool** (A5) — runs `PRAGMA integrity_check`, cross-checks
+  row count and schema against `index.json`, verifies the checksum sidecar,
+  and reports stale-lock state. Returns `overall_status: ok | warning | error`.
+
+### Reproducibility & freshness
+- **`get_dataset_history` tool + profile snapshots** (A8) — every successful
+  `index_local` appends a compact snapshot (timestamp, source hash, schema
+  digest) to `_history.jsonl`. Bounded to the last 50 snapshots. Use this to
+  observe drift across re-ingests of the same dataset.
+- **Deterministic random sampling** (A9) — `sample_rows` accepts a `seed`
+  parameter (when `method='random'`) for reproducible selection.
+- **Cross-parser normalization contract** (A10) — `parser/normalize.py`
+  funnels all native-typed cells (JSONL / Parquet / Excel) through one path,
+  guaranteeing CSV / JSONL / Parquet produce identical column profiles for
+  the same logical data.
+
+### Schema versioning
+- **Index migration framework** (A11) — `INDEX_VERSION` bumped to 2. Indexes
+  written under v1 are now upgraded in place via a registered migration
+  rather than silently triggering a full re-index. Future bumps register a
+  new migration in `storage/migrations.py`.
+
+### Test infrastructure (A12)
+- New test modules: `test_welford`, `test_tdigest`, `test_hll`,
+  `test_semantic_types`, `test_crash_safety`, `test_validate_index`,
+  `test_dataset_history`, `test_migrations`, `test_determinism`,
+  `test_normalize`, `test_aggregate_correctness`. Test count: **266 passing**.
+
+### Stability guarantees declared as of 1.0.0
+- Profile fields documented above are part of the public on-disk schema.
+- New fields will be added under additive migrations only.
+- Crash semantics: a kill at any point during `index_local` leaves the
+  dataset in one of two states — fully indexed or absent. Never partial.
+- `validate_index` is the canonical recovery flow; if it returns `ok`, the
+  dataset is consistent.
+
 ## [0.8.4] — 2026-04-15
 
 ### Documentation

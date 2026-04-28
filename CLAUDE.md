@@ -1,9 +1,11 @@
 # jdatamunch-mcp — Project Brief
 
 ## Current State
-- **Version:** 0.8.3 (published to PyPI)
+- **Version:** 1.0.0 (Phase A complete — see `todo.md` and CHANGELOG `[1.0.0]`)
 - **GitHub:** `jgravelle/jdatamunch-mcp`
 - **Python:** >=3.10
+- **Index format:** INDEX_VERSION = 2 (v1 → v2 migration registered in `storage/migrations.py`)
+- **Tool count:** 21 (added `validate_index`, `get_dataset_history` in 1.0.0)
 
 ## Key Files
 ```
@@ -12,11 +14,16 @@ src/jdatamunch_mcp/
   config.py                    # Index path, max rows env vars
   security.py                  # Path validation
   embeddings.py                # Provider detection (sentence-transformers/Gemini/OpenAI), embed_texts(), cosine_similarity()
-  parser/                      # CSV/Excel file parsing
+  parser/
+    normalize.py               # Cross-parser native→string normalization (1.0.0)
   profiler/
-    column_profiler.py         # Per-column type inference, stats accumulation, finalize_profile()
+    column_profiler.py         # Per-column type inference, Welford+Neumaier stats, finalize_profile()
+    tdigest.py                 # Streaming quantile estimator (1.0.0)
+    hll.py                     # HyperLogLog approximate cardinality (1.0.0)
+    semantic_types.py          # Semantic column-type detectors (1.0.0)
   storage/
-    data_store.py              # DataStore: load/save DatasetIndex (index.json)
+    data_store.py              # DataStore: load/save DatasetIndex (index.json) + crash-safety helpers
+    migrations.py              # INDEX_VERSION migration registry (1.0.0)
     sqlite_store.py            # SQLite backend: create_table, insert_batch, create_indexes
     embedding_store.py         # ColumnEmbeddingStore: column embedding CRUD in dataset SQLite
     token_tracker.py           # estimate_savings, record_savings, cost_avoided
@@ -39,6 +46,8 @@ src/jdatamunch_mcp/
     summarize_dataset.py       # summarize_dataset: regenerate NL summaries for indexed dataset
     index_repo.py              # index_repo: index data files from a GitHub repository
     list_repos.py              # list_repos: list GitHub repositories indexed via index_repo
+    validate_index.py          # validate_index: integrity check on dataset (1.0.0)
+    get_dataset_history.py     # get_dataset_history: profile snapshots over time (1.0.0)
 ```
 
 ## Architecture Notes

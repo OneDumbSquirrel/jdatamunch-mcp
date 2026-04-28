@@ -29,6 +29,8 @@ from .tools.join_datasets import join_datasets
 from .tools.delete_dataset import delete_dataset
 from .tools.embed_dataset import embed_dataset
 from .tools.list_repos import list_repos
+from .tools.validate_index import validate_index
+from .tools.get_dataset_history import get_dataset_history
 from .budget import enforce_budget
 from .call_tracker import record_call
 
@@ -343,7 +345,9 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Return a sample of rows. Useful for understanding data shape "
                 "without prior knowledge. Method: 'head', 'tail', or 'random'. "
-                "Use columns=[] on wide tables to reduce response size."
+                "Use columns=[] on wide tables to reduce response size. "
+                "Pass seed (int) with method='random' for deterministic, "
+                "reproducible sampling."
             ),
             inputSchema={
                 "type": "object",
@@ -364,6 +368,10 @@ async def list_tools() -> list[Tool]:
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "Column projection (default: all)",
+                    },
+                    "seed": {
+                        "type": "integer",
+                        "description": "Deterministic seed for method='random' (omitted = non-deterministic)",
                     },
                 },
                 "required": ["dataset"],
@@ -593,6 +601,44 @@ async def list_tools() -> list[Tool]:
             description="Return cumulative token savings and cost avoided across all tool calls.",
             inputSchema={"type": "object", "properties": {}},
         ),
+        Tool(
+            name="validate_index",
+            description=(
+                "Verify an indexed dataset's on-disk integrity. Runs SQLite "
+                "PRAGMA integrity_check, cross-checks row count and column "
+                "list against index.json, and verifies index.json content "
+                "hash. Reports stale-lock state from interrupted index_local "
+                "runs. Returns overall_status: 'ok' | 'warning' | 'error'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dataset": {"type": "string", "description": "Dataset identifier"},
+                },
+                "required": ["dataset"],
+            },
+        ),
+        Tool(
+            name="get_dataset_history",
+            description=(
+                "Return the last N profile snapshots for a dataset. "
+                "Snapshots are appended on every successful index_local — "
+                "use this to detect schema/content drift over multiple "
+                "ingests of the same dataset. n capped at 50."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dataset": {"type": "string", "description": "Dataset identifier"},
+                    "n": {
+                        "type": "integer",
+                        "description": "Number of snapshots to return (default 10, max 50)",
+                        "default": 10,
+                    },
+                },
+                "required": ["dataset"],
+            },
+        ),
     ]
 
 
@@ -707,6 +753,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 n=arguments.get("n", 5),
                 method=arguments.get("method", "head"),
                 columns=arguments.get("columns"),
+                seed=arguments.get("seed"),
                 storage_path=storage_path,
             )
         elif name == "delete_dataset":
@@ -765,6 +812,17 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "summarize_dataset":
             result = summarize_dataset_tool(
                 dataset=arguments["dataset"],
+                storage_path=storage_path,
+            )
+        elif name == "validate_index":
+            result = validate_index(
+                dataset=arguments["dataset"],
+                storage_path=storage_path,
+            )
+        elif name == "get_dataset_history":
+            result = get_dataset_history(
+                dataset=arguments["dataset"],
+                n=arguments.get("n", 10),
                 storage_path=storage_path,
             )
         else:

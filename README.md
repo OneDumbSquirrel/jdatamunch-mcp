@@ -389,7 +389,53 @@ The agent will call `get_session_stats`, which returns session and lifetime toke
 | `summarize_dataset` | Regenerate NL summaries for an already-indexed dataset without re-parsing the source file. |
 | `embed_dataset` | Precompute column embeddings for semantic search. Optional warm-up to eliminate first-query latency. |
 | `delete_dataset` | Remove an indexed dataset and its SQLite store. Irreversible. |
+| `validate_index` | Verify a dataset's on-disk integrity: SQLite `integrity_check`, row-count cross-check, schema match, `index.json` checksum, stale-lock detection. Returns `ok` / `warning` / `error`. |
+| `get_dataset_history` | Return the last N profile snapshots for a dataset (appended on every successful `index_local`). Use to detect schema/content drift across re-ingests. |
 | `get_session_stats` | Cumulative token savings and cost avoided across the session. Lifetime stats persist across sessions. |
+
+---
+
+## Stability guarantees (v1.0.0)
+
+Earned by Phase A in `todo.md`. These are commitments, not aspirations.
+
+**Statistical correctness**
+- Means use Welford online updates with Neumaier-compensated sums — accurate
+  to 1e-9 relative error across 1e-6..1e6 mixed magnitudes.
+- Quantiles (`p01 / p25 / p50 / p75 / p95 / p99`) come from a streaming t-digest
+  with bounded ~3 KB/column memory regardless of row count.
+- Cardinality reports an exact value below 5,000 distinct keys; above the cap,
+  a HyperLogLog estimate is reported with `cardinality_estimated: true` and
+  ~2% standard error.
+
+**Crash safety**
+- A kill at any point during `index_local` leaves the dataset in one of two
+  states only: fully indexed or absent. Never partial.
+- `data.sqlite` is written to a `.tmp` and renamed only after profiles
+  compute successfully. `index.json` is atomic with a SHA-256 sidecar.
+- A `_lock` file marks in-progress runs. `index_local` auto-recovers from
+  prior crashes by cleaning stale tmp files before starting.
+
+**Recovery flow**
+- Run `validate_index` on any dataset whose state is suspect. If it returns
+  `overall_status: ok`, the dataset is consistent. Otherwise the report names
+  the specific finding (row-count mismatch, checksum drift, missing SQLite,
+  stale lock, etc.).
+
+**Schema versioning**
+- The on-disk index format is versioned (`INDEX_VERSION = 2` at 1.0.0).
+- New profile fields are added under additive migrations registered in
+  `storage/migrations.py`. Indexes from prior versions are upgraded in place
+  rather than triggering silent re-indexing.
+- Public profile fields documented in CHANGELOG `[1.0.0]` are stable.
+
+**Reproducibility**
+- `sample_rows(method='random', seed=N)` is deterministic.
+- `index_local` produces byte-identical `index.json` (modulo timestamps + the
+  resolved source path) for the same input file across runs.
+- All four parsers (CSV / JSONL / Parquet / Excel) route native-typed cells
+  through one normalizer, so the same logical data produces identical
+  column profiles regardless of source format.
 
 ---
 

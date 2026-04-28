@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Generator
 
+from .normalize import normalize_native
 from .types import ColumnInfo, ParsedDataset
 
 
@@ -15,7 +16,7 @@ def _row_generator(path: str, col_count: int) -> Generator:
         arrays = [batch.column(i).to_pylist() for i in range(col_count)]
         for row_idx in range(len(batch)):
             yield [
-                str(arrays[col][row_idx]) if arrays[col][row_idx] is not None else ""
+                normalize_native(arrays[col][row_idx], "parquet")
                 for col in range(col_count)
             ]
 

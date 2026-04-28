@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Generator, Optional
 
+from .normalize import normalize_native
 from .types import ColumnInfo, ParsedDataset
 
 
@@ -12,27 +13,15 @@ from .types import ColumnInfo, ParsedDataset
 # ---------------------------------------------------------------------------
 
 def _xlsx_row_generator(path: str, sheet_name: Optional[str], header_row: int) -> Generator:
-    """Yield data rows as lists of strings from an .xlsx file."""
+    """Yield data rows as normalized strings from an .xlsx file."""
     import openpyxl
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     ws = wb[sheet_name] if sheet_name else wb.active
     for i, row in enumerate(ws.iter_rows(values_only=True)):
         if i == header_row:
             continue
-        yield [_xlsx_cell_to_str(v) for v in row]
+        yield [normalize_native(v, "xlsx") for v in row]
     wb.close()
-
-
-def _xlsx_cell_to_str(value) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, bool):
-        return str(value)
-    if isinstance(value, float):
-        return str(int(value)) if value == int(value) else str(value)
-    if isinstance(value, int):
-        return str(value)
-    return str(value)
 
 
 def _parse_xlsx(path: str, sheet: Optional[str], header_row: int) -> ParsedDataset:
@@ -70,28 +59,22 @@ def _parse_xlsx(path: str, sheet: Optional[str], header_row: int) -> ParsedDatas
 # ---------------------------------------------------------------------------
 
 def _xls_cell_to_str(sheet, row_idx: int, col_idx: int, datemode: int) -> str:
-    """Convert an xlrd cell to a string value."""
+    """Convert an xlrd cell to a normalized string via the shared normalizer."""
     import xlrd
     ctype = sheet.cell_type(row_idx, col_idx)
     value = sheet.cell_value(row_idx, col_idx)
 
-    if ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
-        return ""
-    if ctype == xlrd.XL_CELL_ERROR:
+    if ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR):
         return ""
     if ctype == xlrd.XL_CELL_BOOLEAN:
-        return str(bool(value))
+        return normalize_native(bool(value), "xls")
     if ctype == xlrd.XL_CELL_DATE:
         try:
             dt = xlrd.xldate_as_datetime(value, datemode)
-            return dt.strftime("%Y-%m-%d %H:%M:%S") if dt.hour or dt.minute or dt.second else dt.strftime("%Y-%m-%d")
+            return normalize_native(dt, "xls")
         except Exception:
-            return str(value)
-    if ctype == xlrd.XL_CELL_NUMBER:
-        if value == int(value):
-            return str(int(value))
-        return str(value)
-    return str(value)
+            return normalize_native(value, "xls")
+    return normalize_native(value, "xls")
 
 
 def _xls_row_generator(path: str, sheet_name: Optional[str], header_row: int) -> Generator:

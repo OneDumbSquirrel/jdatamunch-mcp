@@ -3,9 +3,17 @@
 Storage layout:
     ~/.data-index/
         {dataset_id}/
-            index.json      — DataIndex: profiles, stats, schema
-            data.sqlite     — Row-level data for filtered retrieval
-        _savings.json       — Token savings tracker
+            index.json          — DataIndex: profiles, stats, schema
+            index.json.sha256   — checksum of index.json (atomic-write sidecar)
+            data.sqlite         — Row-level data for filtered retrieval
+            _lock               — present while indexing; absence on read = consistent state
+            _history.jsonl      — append-only profile snapshots (rotated to last 50)
+        _savings.json           — Token savings tracker
+
+Crash-safety guarantees (A4):
+  * data.sqlite is written to data.sqlite.tmp first, then renamed.
+  * index.json is written via tmp+rename plus a sidecar SHA-256.
+  * _lock file marks an in-progress index_local; readers detect stale locks.
 """
 
 import hashlib
@@ -16,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-INDEX_VERSION = 1
+INDEX_VERSION = 2  # bumped from 1: adds quantiles, std_dev, semantic_type, type_confidence, HLL
 
 
 @dataclass
@@ -47,6 +55,10 @@ def _hash_file(path: str) -> str:
     return "sha256:" + h.hexdigest()
 
 
+def _hash_bytes(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
 def _profile_to_dict(p: Any) -> dict:
     """Serialize a ColumnProfile dataclass to a JSON-safe dict."""
     return {
@@ -58,15 +70,25 @@ def _profile_to_dict(p: Any) -> dict:
         "null_pct": p.null_pct,
         "cardinality": p.cardinality,
         "cardinality_is_exact": p.cardinality_is_exact,
+        "cardinality_estimated": getattr(p, "cardinality_estimated", False),
+        "cardinality_approx": getattr(p, "cardinality_approx", None),
         "is_unique": p.is_unique,
         "is_primary_key_candidate": p.is_primary_key_candidate,
         "min": p.min,
         "max": p.max,
         "mean": p.mean,
         "median": p.median,
+        "std_dev": getattr(p, "std_dev", None),
+        "variance": getattr(p, "variance", None),
+        "quantiles": getattr(p, "quantiles", None),
         "sample_values": p.sample_values,
         "value_index": p.value_index,
         "top_values": p.top_values,
+        "type_confidence": getattr(p, "type_confidence", 1.0),
+        "type_violation_count": getattr(p, "type_violation_count", 0),
+        "type_violation_samples": getattr(p, "type_violation_samples", []),
+        "semantic_type": getattr(p, "semantic_type", None),
+        "semantic_confidence": getattr(p, "semantic_confidence", 0.0),
         "datetime_min": p.datetime_min,
         "datetime_max": p.datetime_max,
         "datetime_format": p.datetime_format,
@@ -131,6 +153,66 @@ class DataStore:
     def sqlite_path(self, dataset_id: str) -> Path:
         return self.dataset_dir(dataset_id) / "data.sqlite"
 
+    def lock_path(self, dataset_id: str) -> Path:
+        return self.dataset_dir(dataset_id) / "_lock"
+
+    def history_path(self, dataset_id: str) -> Path:
+        return self.dataset_dir(dataset_id) / "_history.jsonl"
+
+    def index_checksum_path(self, dataset_id: str) -> Path:
+        return self.dataset_dir(dataset_id) / "index.json.sha256"
+
+    # ------------------------------------------------------------------
+    # Lock / crash-safety helpers (A4)
+    # ------------------------------------------------------------------
+
+    def acquire_lock(self, dataset_id: str) -> None:
+        """Mark a dataset as 'index in progress'. Caller should call release_lock on success."""
+        d = self.dataset_dir(dataset_id)
+        d.mkdir(parents=True, exist_ok=True)
+        lock = self.lock_path(dataset_id)
+        lock.write_text(datetime.now().isoformat(), encoding="utf-8")
+
+    def release_lock(self, dataset_id: str) -> None:
+        lock = self.lock_path(dataset_id)
+        if lock.exists():
+            try:
+                lock.unlink()
+            except OSError:
+                pass
+
+    def cleanup_stale_artifacts(self, dataset_id: str) -> bool:
+        """Remove tmp SQLite + leftover lock if a prior index_local crashed.
+
+        Returns True if cleanup was performed (caller should treat dataset as not indexed).
+        """
+        d = self.dataset_dir(dataset_id)
+        if not d.exists():
+            return False
+        had_lock = self.lock_path(dataset_id).exists()
+        had_tmp = (d / "data.sqlite.tmp").exists()
+        had_index = self.index_path(dataset_id).exists()
+        if had_lock and not had_index:
+            # crash mid-load → clean everything tmp-ish, leave the dataset dir
+            for stale in (d / "data.sqlite.tmp", d / "index.json.tmp", self.lock_path(dataset_id)):
+                if stale.exists():
+                    try:
+                        stale.unlink()
+                    except OSError:
+                        pass
+            return True
+        if had_tmp and had_index:
+            # successful index, but a stray tmp survived — delete it
+            try:
+                (d / "data.sqlite.tmp").unlink()
+            except OSError:
+                pass
+        return False
+
+    # ------------------------------------------------------------------
+    # Save / load
+    # ------------------------------------------------------------------
+
     def save(
         self,
         dataset_id: str,
@@ -168,25 +250,79 @@ class DataStore:
         dir_.mkdir(parents=True, exist_ok=True)
         path = self.index_path(dataset_id)
         tmp = path.with_suffix(".json.tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(_index_to_dict(idx), f, indent=2)
+        payload = json.dumps(_index_to_dict(idx), indent=2).encode("utf-8")
+        with open(tmp, "wb") as f:
+            f.write(payload)
         tmp.replace(path)
+        # Sidecar checksum (A4)
+        checksum_path = self.index_checksum_path(dataset_id)
+        checksum_path.write_text(_hash_bytes(payload), encoding="utf-8")
 
         return idx
 
+    def append_history(self, dataset_id: str, snapshot: dict) -> None:
+        """Append a profile snapshot to _history.jsonl, rotating to last 50 (A8)."""
+        path = self.history_path(dataset_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing: list = []
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            existing.append(line)
+            except OSError:
+                existing = []
+        existing.append(json.dumps(snapshot, separators=(",", ":")))
+        # Keep last 50
+        existing = existing[-50:]
+        tmp = path.with_suffix(".jsonl.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            for line in existing:
+                f.write(line + "\n")
+        tmp.replace(path)
+
+    def read_history(self, dataset_id: str, n: int = 10) -> list:
+        path = self.history_path(dataset_id)
+        if not path.exists():
+            return []
+        snaps: list = []
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    snaps.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return snaps[-n:] if n > 0 else snaps
+
     def load(self, dataset_id: str) -> Optional[DataIndex]:
-        """Load a DataIndex from storage. Returns None if not found."""
+        """Load a DataIndex from storage. Returns None if not found.
+
+        Auto-runs migrations if index_version < current INDEX_VERSION (A11).
+        """
         path = self.index_path(dataset_id)
         if not path.exists():
             return None
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            with open(path, "rb") as f:
+                raw = f.read()
+            data = json.loads(raw.decode("utf-8"))
+        except Exception:
+            return None
+
+        # Run migrations to bring the on-disk dict up to current version (A11)
+        from .migrations import migrate_to_current
+        try:
+            data = migrate_to_current(data)
         except Exception:
             return None
 
         if data.get("index_version", 1) != INDEX_VERSION:
-            return None  # version mismatch → triggers full re-index
+            return None  # version mismatch we can't migrate → triggers full re-index
 
         return _index_from_dict(data)
 

@@ -15,12 +15,14 @@ def sample_rows(
     n: int = 5,
     method: str = "head",
     columns: Optional[list] = None,
+    seed: Optional[int] = None,
     storage_path: Optional[str] = None,
 ) -> dict:
     """Return a sample of rows from the dataset.
 
     Useful for quickly understanding data shape without prior knowledge.
     method: "head" (first rows), "tail" (last rows), or "random"
+    seed: when method='random', makes selection deterministic (A9).
     """
     t0 = time.time()
 
@@ -65,6 +67,7 @@ def sample_rows(
         n=n,
         method=method,
         columns=columns,
+        seed=seed,
     )
 
     response_bytes = len(json.dumps(rows).encode("utf-8"))
