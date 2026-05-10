@@ -59,6 +59,7 @@ Index once. Query cheaply. Keep moving.
 ![Local-first](https://img.shields.io/badge/local--first-yes-brightgreen)
 ![SQLite](https://img.shields.io/badge/storage-SQLite-9cf)
 ![jMRI](https://img.shields.io/badge/jMRI-Full-blueviolet)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20102349.svg)](https://doi.org/10.5281/zenodo.20102349)
 [![PyPI version](https://img.shields.io/pypi/v/jdatamunch-mcp)](https://pypi.org/project/jdatamunch-mcp/)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/jdatamunch-mcp)](https://pypi.org/project/jdatamunch-mcp/)
 
