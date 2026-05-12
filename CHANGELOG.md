@@ -1,5 +1,45 @@
 # Changelog
 
+## [1.8.0] — 2026-05-12 — `check_column_drop_safe` (Phase-1 #3 — killer feature)
+
+The killer feature of the Phase-1 sibling-parity batch. Composite
+preflight that fuses four channels — PK status, FK heuristics, cross-
+dataset name match, and runtime traffic — into a single verdict plus
+ranked blockers and a one-line `recommended_action`.
+
+### New: `check_column_drop_safe` MCP tool
+
+Verdict tiers (highest-severity-first):
+
+- **`pk_blocking`** — column is a primary-key candidate
+- **`fk_blocking`** — likely foreign-key participation (source or target)
+- **`runtime_observed`** — `runtime_query_calls` in last 30 days (window configurable)
+- **`cross_dataset_blocking`** — another indexed dataset has a same-named column
+- **`safe_to_drop`** — none of the above
+
+### Channels
+
+1. **PK status** — `is_primary_key_candidate` from the static profile.
+2. **FK source** — heuristic name-match (`user_id` → dataset `users` with PK `id`) plus direct PK name-match across other indexed datasets. Cheap structural check; no value-containment scan.
+3. **FK target** — mirror of #2: this column is a PK and other datasets carry plausible FK-shaped columns (`<self>_id` / `<singular>_id`).
+4. **Runtime traffic** — sum of `calls` in `runtime_query_calls` over `window_days` (default 30).
+5. **Cross-dataset name match** — case-insensitive same-name lookup across `list_datasets()`. Capped at 10 hits.
+
+### Honest hint when runtime data is absent
+
+When no `ingest_sql_log` has run against the dataset, `safe_to_drop`
+verdicts carry an explicit caveat in `recommended_action` pointing the
+operator at `ingest_sql_log`. The static channels alone can prove
+*risk*, but not *safety*.
+
+### Stats
+
+- Tool count: 29 → 30
+- Tests: 406 → 418 (+12 new)
+
+Inspired by `check_delete_safe` in jcodemunch-mcp (see
+`C:/MCPs/PRD_sibling_parity_v1.md` §5.2).
+
 ## [1.7.0] — 2026-05-12 — `find_unused_columns` (Phase-1 #2)
 
 Second Phase-1 tool from the sibling-parity PRD. The first consumer of

@@ -1,12 +1,12 @@
 # jdatamunch-mcp — Project Brief
 
 ## Current State
-- **Version:** 1.7.0 (Second Phase-1 sibling-parity tool — `find_unused_columns` reads `runtime_query_calls` and surfaces columns with zero or stale runtime traffic over a configurable window. Refuses with explicit error when no runtime data exists. PK + audit-field exclusion on by default. `check_column_drop_safe` + `data_health_radar` land next.)
+- **Version:** 1.8.0 (Third Phase-1 sibling-parity tool — `check_column_drop_safe`: composite preflight for column deletion, fuses PK status + FK heuristics + cross-dataset name match + runtime traffic into a single verdict. Killer feature of the Phase-1 batch. `get_schema_impact` + `data_health_radar` land next.)
 - **GitHub:** `jgravelle/jdatamunch-mcp`
 - **Python:** >=3.10
 - **Index format:** INDEX_VERSION = 3 (v1→v2→v3 migrations registered in `storage/migrations.py`; v3 is additive — new runtime tables created on first ingest, legacy v2 indexes load fine)
-- **Tool count:** 29 (1.6.0 added `ingest_sql_log`; 1.7.0 adds `find_unused_columns`)
-- **Tests:** 406 passed, 10 skipped (1.7.0)
+- **Tool count:** 30 (1.6.0 added `ingest_sql_log`; 1.7.0 added `find_unused_columns`; 1.8.0 adds `check_column_drop_safe`)
+- **Tests:** 418 passed, 10 skipped (1.8.0)
 
 ## Key Files
 ```
@@ -52,6 +52,7 @@ src/jdatamunch_mcp/
     validate_index.py          # validate_index: integrity check on dataset (1.0.0)
     get_dataset_history.py     # get_dataset_history: profile snapshots over time (1.0.0)
     find_unused_columns.py     # (1.7.0) Runtime-driven dead-column detection. Reads runtime_query_calls + dataset schema; surfaces columns with reason ∈ {zero_hits, stale, below_min_calls}. Refuses when no runtime data exists. PK + audit-field exclusion on by default. Audit patterns: created_at, updated_at, _dbt_*, etl_*, etc.
+    check_column_drop_safe.py  # (1.8.0) Composite preflight: is this column safe to drop? Fuses PK status + FK heuristics (name-match + stem-match like `user_id` → `users.id`) + cross-dataset name match + runtime_query_calls in window. Verdict tiers: pk_blocking, fk_blocking, runtime_observed, cross_dataset_blocking, safe_to_drop. Ranked blockers (≤5) + recommended_action. Mirrors jcm's check_delete_safe.
 ```
 
 ## Architecture Notes

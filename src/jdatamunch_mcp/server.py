@@ -32,6 +32,7 @@ from .tools.list_repos import list_repos
 from .tools.validate_index import validate_index
 from .runtime import ingest_sql_log_file
 from .tools.find_unused_columns import find_unused_columns
+from .tools.check_column_drop_safe import check_column_drop_safe
 from .tools.get_dataset_history import get_dataset_history
 from .tools.get_dataset_health import get_dataset_health
 from .tools.suggest_keys import suggest_keys
@@ -860,6 +861,31 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="check_column_drop_safe",
+            description=(
+                "Composite preflight: is this column safe to drop? Fuses four "
+                "signals — primary-key status, foreign-key participation, "
+                "cross-dataset name match, and runtime traffic — into a single "
+                "verdict plus ranked blockers and a recommended_action. "
+                "Verdict tiers: pk_blocking, fk_blocking, runtime_observed, "
+                "cross_dataset_blocking, safe_to_drop. Read-only. The killer "
+                "feature of the Phase-1 sibling-parity batch."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dataset_id": {"type": "string"},
+                    "column": {"type": "string", "description": "Column name (case-insensitive)."},
+                    "window_days": {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Look-back window for runtime traffic. Default 30.",
+                    },
+                },
+                "required": ["dataset_id", "column"],
+            },
+        ),
+        Tool(
             name="find_unused_columns",
             description=(
                 "Surface columns with zero or stale runtime traffic. Reads "
@@ -1177,6 +1203,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 redact=arguments.get("redact", True),
                 redact_patterns=arguments.get("redact_patterns"),
                 redact_skip_columns=arguments.get("redact_skip_columns"),
+                storage_path=storage_path,
+            )
+        elif name == "check_column_drop_safe":
+            result = await asyncio.to_thread(
+                check_column_drop_safe,
+                dataset_id=arguments["dataset_id"],
+                column=arguments["column"],
+                window_days=arguments.get("window_days", 30),
                 storage_path=storage_path,
             )
         elif name == "find_unused_columns":
