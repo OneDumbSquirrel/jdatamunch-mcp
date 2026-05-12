@@ -35,6 +35,8 @@ from .tools.find_unused_columns import find_unused_columns
 from .tools.check_column_drop_safe import check_column_drop_safe
 from .tools.get_schema_impact import get_schema_impact
 from .tools.get_redaction_log import get_redaction_log
+from .tools.data_health_radar import data_health_radar
+from .tools.health_radar import diff_data_health_radar
 from .tools.get_dataset_history import get_dataset_history
 from .tools.get_dataset_health import get_dataset_health
 from .tools.suggest_keys import suggest_keys
@@ -1020,6 +1022,57 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="data_health_radar",
+            description=(
+                "Six-axis health radar for a dataset: null_health, type_confidence, "
+                "cardinality_health, pk_presence, semantic_coverage, schema_stability "
+                "(omitted when <2 history snapshots). Optional 7th axis runtime_coverage "
+                "when traces ingested. Returns 0-100 score per axis + composite + A-F "
+                "grade. Pairs with diff_data_health_radar for snapshot deltas. "
+                "Mirrors jcm's six-axis health radar."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dataset": {"type": "string"},
+                    "include_runtime": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Fuse runtime_coverage axis when traces exist.",
+                    },
+                    "window_days": {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Lookback for the runtime axis. Default 30.",
+                    },
+                },
+                "required": ["dataset"],
+            },
+        ),
+        Tool(
+            name="diff_data_health_radar",
+            description=(
+                "Diff two data_health_radar payloads. Pure function — pass the `radar` "
+                "sub-field from two data_health_radar responses (e.g. yesterday vs today). "
+                "Returns per-axis deltas, composite delta, grade change, regression and "
+                "improvement lists (threshold: 3 points), one-line verdict."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "baseline": {
+                        "type": "object",
+                        "description": "Baseline radar payload (e.g. yesterday's snapshot).",
+                    },
+                    "current": {
+                        "type": "object",
+                        "description": "Current radar payload (e.g. today's snapshot).",
+                    },
+                },
+                "required": ["baseline", "current"],
+            },
+        ),
+        Tool(
             name="get_redaction_log",
             description=(
                 "Forensic accounting of PII redactions for a dataset. Returns "
@@ -1328,6 +1381,19 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 redact=arguments.get("redact", True),
                 max_rows=arguments.get("max_rows", 100000),
                 storage_path=storage_path,
+            )
+        elif name == "data_health_radar":
+            result = await asyncio.to_thread(
+                data_health_radar,
+                dataset=arguments["dataset"],
+                include_runtime=arguments.get("include_runtime", True),
+                window_days=arguments.get("window_days", 30),
+                storage_path=storage_path,
+            )
+        elif name == "diff_data_health_radar":
+            result = diff_data_health_radar(
+                baseline=arguments["baseline"],
+                current=arguments["current"],
             )
         elif name == "get_redaction_log":
             result = await asyncio.to_thread(

@@ -1,12 +1,12 @@
 # jdatamunch-mcp — Project Brief
 
 ## Current State
-- **Version:** 1.10.0 (Phase-2 opener — `get_redaction_log`: per-pattern PII redaction counts from `runtime_redaction_log`, mirrors jcm's tool keyed on dataset_id. Plus `get_data_hotspots` v2: fuses a 4th `traffic` signal from `runtime_query_calls` when traces exist; honest-hint caveat in `_meta.runtime_caveat` when `include_runtime=True` but no traces ingested. v1 scoring preserved bit-for-bit when absent.)
+- **Version:** 1.11.0 (Phase-2 continuing — `data_health_radar` + `diff_data_health_radar`: six-axis 0-100 dataset health scorecard (null_health, type_confidence, cardinality_health, pk_presence, semantic_coverage, schema_stability) with optional 7th runtime_coverage axis. Mirrors jcm's six-axis health radar; omitted_axes list keeps the composite comparable across datasets with different ingest states.)
 - **GitHub:** `jgravelle/jdatamunch-mcp`
 - **Python:** >=3.10
 - **Index format:** INDEX_VERSION = 3 (v1→v2→v3 migrations registered in `storage/migrations.py`; v3 is additive — new runtime tables created on first ingest, legacy v2 indexes load fine)
-- **Tool count:** 32 (1.6.0 added `ingest_sql_log`; 1.7.0 added `find_unused_columns`; 1.8.0 added `check_column_drop_safe`; 1.9.0 added `get_schema_impact`; 1.10.0 adds `get_redaction_log` + enhances `get_data_hotspots` to v2)
-- **Tests:** 442 passed, 10 skipped (1.10.0)
+- **Tool count:** 34 (1.6.0 added `ingest_sql_log`; 1.7.0 added `find_unused_columns`; 1.8.0 added `check_column_drop_safe`; 1.9.0 added `get_schema_impact`; 1.10.0 added `get_redaction_log` + `get_data_hotspots` v2; 1.11.0 adds `data_health_radar` + `diff_data_health_radar`)
+- **Tests:** 455 passed, 10 skipped (1.11.0)
 
 ## Key Files
 ```
@@ -54,6 +54,8 @@ src/jdatamunch_mcp/
     find_unused_columns.py     # (1.7.0) Runtime-driven dead-column detection. Reads runtime_query_calls + dataset schema; surfaces columns with reason ∈ {zero_hits, stale, below_min_calls}. Refuses when no runtime data exists. PK + audit-field exclusion on by default. Audit patterns: created_at, updated_at, _dbt_*, etl_*, etc.
     check_column_drop_safe.py  # (1.8.0) Composite preflight: is this column safe to drop? Fuses PK status + FK heuristics (name-match + stem-match like `user_id` → `users.id`) + cross-dataset name match + runtime_query_calls in window. Verdict tiers: pk_blocking, fk_blocking, runtime_observed, cross_dataset_blocking, safe_to_drop. Ranked blockers (≤5) + recommended_action. Mirrors jcm's check_delete_safe.
     get_schema_impact.py       # (1.9.0) Transitive impact of a column-level schema change (drop_column / rename_column / retype_column). Walks the inferred FK graph to max_depth, classifies each hit as fk_source / fk_target / cross_dataset_name_match / runtime_traffic. For retype_column, flags type_mismatch entries at FK edges whose partner type wouldn't survive. Returns direct_impact + transitive_impact + summary + normalised blast_score ∈ [0, 1]. Mirrors jcm's get_blast_radius.
+    health_radar.py            # (1.11.0) Pure-function core: compute_radar() builds the six (or seven) axis payload from raw signals; diff_radar() computes axis-by-axis deltas + verdict; diff_data_health_radar() is the MCP entry point that validates the input shape. No I/O.
+    data_health_radar.py       # (1.11.0) Six-axis dataset health radar: null_health, type_confidence, cardinality_health, pk_presence, semantic_coverage, schema_stability (+ optional runtime_coverage). Reads index.json + history + runtime_query_calls; produces a 0-100 score per axis + composite + A-F grade. Omitted axes never silently penalise the composite — they appear in `omitted_axes`.
     get_redaction_log.py       # (1.10.0) Forensic accounting of PII redactions for a dataset. Reads runtime_redaction_log (populated by ingest_sql_log with redact=True) and returns per-pattern counts + sources + last_seen. Filters by source ('sql_log') and since_days. Empty result is not an error — distinguished from unknown-dataset / invalid-source via structured `reason` codes. Mirrors jcm's get_redaction_log keyed on dataset_id.
 ```
 

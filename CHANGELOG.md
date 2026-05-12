@@ -1,5 +1,49 @@
 # Changelog
 
+## [1.11.0] — 2026-05-12 — `data_health_radar` + `diff_data_health_radar`
+
+Six-axis health radar for tabular datasets, plus a pure-function diff
+helper for snapshot-to-snapshot comparisons. Mirrors jcm's
+`health_radar.py` shape (six-axis + optional seventh runtime axis +
+A-F grade + axis-by-axis diff).
+
+### New: `data_health_radar` MCP tool
+
+Composes per-column signals from index.json + history snapshots into a
+0-100 score across six axes plus a composite + letter grade:
+
+| Axis              | Source                                          |
+|-------------------|-------------------------------------------------|
+| null_health       | 100 − mean(null_pct) across columns             |
+| type_confidence   | mean(type_confidence) × 100                     |
+| cardinality_health| linear penalty per constant column              |
+| pk_presence       | has PK candidate → 100, else 50                 |
+| semantic_coverage | semantic_type detected / typeable candidates    |
+| schema_stability  | drift-free between first/last history snapshot  |
+| runtime_coverage  | (optional) % of columns with traffic in window  |
+
+`schema_stability` is omitted when fewer than two history snapshots
+exist. `runtime_coverage` is omitted when no runtime traces are
+ingested or `include_runtime=False`. Omitted axes appear in the
+`omitted_axes` list, never silently — they don't count toward the
+composite so radars stay comparable across datasets with different
+ingest states.
+
+### New: `diff_data_health_radar` MCP tool
+
+Pure function: takes two radar payloads and returns per-axis deltas,
+composite delta, grade change, lists of regressions and improvements
+(threshold: 3 points), and a one-line verdict. No I/O — pass radar
+payloads from disk, CI artifacts, or two consecutive
+`data_health_radar` calls.
+
+### Stats
+
+- Tool count: 34 (+ `data_health_radar`, `diff_data_health_radar`)
+- Tests: 455 passed, 10 skipped (+13 new across the two tools)
+
+---
+
 ## [1.10.0] — 2026-05-12 — `get_redaction_log` + `get_data_hotspots` v2 (Phase-2 opener)
 
 First Phase-2 release. Two thin tools bundled because both are reads off
