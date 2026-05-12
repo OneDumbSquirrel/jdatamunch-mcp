@@ -152,3 +152,56 @@ def test_meta_present(tmp_path, clean_csv):
     assert "_meta" in r
     assert "timing_ms" in r["_meta"]
     assert "tokens_saved" in r["_meta"]
+
+
+# --- v2 runtime fusion (v1.10.0) ---
+
+import csv as _csv
+
+from jdatamunch_mcp.runtime.ingest import ingest_sql_log_file
+
+
+def _write_sql_log(tmp_path, rows):
+    path = tmp_path / "log.csv"
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+    return path
+
+
+def test_no_runtime_data_emits_honest_hint(tmp_path, clean_csv):
+    storage = _index(tmp_path, clean_csv, "clean")
+    r = get_data_hotspots("clean", storage_path=storage)
+    assert "runtime_caveat" in r["_meta"]
+    assert "ingest_sql_log" in r["_meta"]["runtime_caveat"]
+    assert r["_meta"]["signals_used"] == ["null_pct", "cardinality", "outlier"]
+    assert r["result"]["runtime_data_present"] is False
+
+
+def test_include_runtime_false_omits_caveat(tmp_path, clean_csv):
+    storage = _index(tmp_path, clean_csv, "clean")
+    r = get_data_hotspots("clean", include_runtime=False, storage_path=storage)
+    assert "runtime_caveat" not in r["_meta"]
+    assert r["_meta"]["signals_used"] == ["null_pct", "cardinality", "outlier"]
+
+
+def test_traffic_signal_fuses_when_traces_exist(tmp_path, dirty_csv):
+    storage = _index(tmp_path, dirty_csv, "dirty")
+    log = _write_sql_log(tmp_path, [
+        {"query": "SELECT amount FROM dirty WHERE id = 1", "calls": "1000", "total_time": "1"},
+        {"query": "SELECT category FROM dirty", "calls": "5", "total_time": "1"},
+    ])
+    ingest_sql_log_file(str(log), storage_path=storage)
+
+    r = get_data_hotspots("dirty", storage_path=storage)
+    assert "runtime_caveat" not in r["_meta"]
+    assert r["_meta"]["signals_used"] == ["null_pct", "cardinality", "outlier", "traffic"]
+    assert r["result"]["runtime_data_present"] is True
+
+    by_col = {h["column"]: h for h in r["result"]["hotspots"]}
+    assert by_col["amount"]["traffic_calls"] >= 1000
+    assert by_col["amount"]["traffic_score"] == 1.0
+    # Heavily-trafficked outlier column should outrank lightly-trafficked category.
+    assert by_col["amount"]["hotspot_score"] > by_col["category"]["hotspot_score"]

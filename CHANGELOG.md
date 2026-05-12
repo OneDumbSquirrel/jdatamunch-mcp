@@ -1,5 +1,52 @@
 # Changelog
 
+## [1.10.0] — 2026-05-12 — `get_redaction_log` + `get_data_hotspots` v2 (Phase-2 opener)
+
+First Phase-2 release. Two thin tools bundled because both are reads off
+already-populated tables with no behavior to bake individually.
+
+### New: `get_redaction_log` MCP tool
+
+Forensic accounting of PII redactions per dataset. Reads
+`runtime_redaction_log` (populated by `ingest_sql_log` with
+`redact=True`, the default) and surfaces per-pattern counts so operators
+can verify the redaction chokepoint is actually firing on production
+traffic.
+
+- Filters by `source` (today: `sql_log`) and `since_days` window.
+- Returns `{dataset, sources, since_iso, patterns[], total_redactions}`.
+- Empty patterns list is **not** an error — it's a valid "nothing
+  scrubbed yet" state, distinguished from invalid-source / unknown-
+  dataset refusals which return structured `reason` codes.
+- Mirrors jcodemunch-mcp's `get_redaction_log` (Phase 6) but keyed on
+  `dataset_id` and reads jData's `(pattern, count, source, last_seen)`
+  table shape.
+
+### Enhanced: `get_data_hotspots` v2 (runtime traffic fusion)
+
+Adds a 4th signal — **runtime traffic** — when traces have been
+ingested. Score becomes
+`null(0.30) + cardinality(0.20) + outlier(0.20) + traffic(0.30)`. The
+traffic axis is normalised by the most-called column in the dataset,
+amplifying risk on heavily-queried problematic columns. A 100%-null
+column nobody queries is now correctly less urgent than a 30%-null
+column queried 10k times a day.
+
+When `include_runtime=True` (default) but no traces are ingested, the
+response carries an **honest-hint caveat** in `_meta.runtime_caveat`
+rather than silently falling back to v1 scoring without disclosure.
+`runtime_data_present` is surfaced on every response. v1 scoring is
+preserved bit-for-bit when traces are absent or `include_runtime=False`.
+Honest-hint pattern lifted from `check_column_drop_safe` v1.8.0 and
+jcm's `check_delete_safe` v1.108.6.
+
+### Stats
+
+- Tool count: 32 (1.10.0 adds `get_redaction_log`)
+- Tests: 442 passed, 10 skipped (+ 8 new across the two tools)
+
+---
+
 ## [1.9.0] — 2026-05-12 — `get_schema_impact` (Phase-1 COMPLETE)
 
 Fourth and final Phase-1 sibling-parity tool. Walks the inferred FK

@@ -34,6 +34,7 @@ from .runtime import ingest_sql_log_file
 from .tools.find_unused_columns import find_unused_columns
 from .tools.check_column_drop_safe import check_column_drop_safe
 from .tools.get_schema_impact import get_schema_impact
+from .tools.get_redaction_log import get_redaction_log
 from .tools.get_dataset_history import get_dataset_history
 from .tools.get_dataset_health import get_dataset_health
 from .tools.suggest_keys import suggest_keys
@@ -486,9 +487,11 @@ async def list_tools() -> list[Tool]:
             name="get_data_hotspots",
             description=(
                 "Return the highest-risk columns in a dataset ranked by a composite score "
-                "combining: null rate, cardinality anomalies, and numeric outlier spread. "
-                "Use this as a first-look triage — analogous to jcodemunch's get_hotspots. "
-                "top_n capped at 50. Assessment per column: 'low' | 'medium' | 'high'."
+                "combining: null rate, cardinality anomalies, numeric outlier spread, and "
+                "(v1.10.0) runtime traffic from runtime_query_calls when traces exist. "
+                "When include_runtime is true but no traces are ingested, the response "
+                "carries an honest-hint caveat in _meta.runtime_caveat rather than silently "
+                "scoring on static signals alone. top_n capped at 50."
             ),
             inputSchema={
                 "type": "object",
@@ -501,6 +504,16 @@ async def list_tools() -> list[Tool]:
                         "type": "integer",
                         "description": "Number of hotspot columns to return (default 10, max 50)",
                         "default": 10,
+                    },
+                    "include_runtime": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Fuse traffic signal from runtime_query_calls when available.",
+                    },
+                    "window_days": {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Lookback window for the traffic signal. Default 30.",
                     },
                 },
                 "required": ["dataset"],
@@ -1006,6 +1019,33 @@ async def list_tools() -> list[Tool]:
                 "required": ["file_path"],
             },
         ),
+        Tool(
+            name="get_redaction_log",
+            description=(
+                "Forensic accounting of PII redactions for a dataset. Returns "
+                "per-pattern counts from runtime_redaction_log (populated by "
+                "ingest_sql_log with redact=True), so operators can verify the "
+                "chokepoint is firing on production traffic. Filter by source "
+                "and lookback window. Empty result with no traces ingested is "
+                "not an error — it just means no scrubbing has happened yet."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dataset_id": {"type": "string"},
+                    "source": {
+                        "type": "string",
+                        "description": "Optional source filter. Today: 'sql_log'.",
+                    },
+                    "since_days": {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Lookback window for last_seen. Default 30.",
+                    },
+                },
+                "required": ["dataset_id"],
+            },
+        ),
     ]
 
 
@@ -1154,6 +1194,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = get_data_hotspots(
                 dataset=arguments["dataset"],
                 top_n=arguments.get("top_n", 10),
+                include_runtime=arguments.get("include_runtime", True),
+                window_days=arguments.get("window_days", 30),
                 storage_path=storage_path,
             )
         elif name == "get_correlations":
@@ -1285,6 +1327,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 source=arguments.get("source", "auto"),
                 redact=arguments.get("redact", True),
                 max_rows=arguments.get("max_rows", 100000),
+                storage_path=storage_path,
+            )
+        elif name == "get_redaction_log":
+            result = await asyncio.to_thread(
+                get_redaction_log,
+                dataset_id=arguments["dataset_id"],
+                source=arguments.get("source"),
+                since_days=arguments.get("since_days", 30),
                 storage_path=storage_path,
             )
         else:
