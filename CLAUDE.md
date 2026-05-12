@@ -1,12 +1,12 @@
 # jdatamunch-mcp — Project Brief
 
 ## Current State
-- **Version:** 1.6.0 (Phase-1 sibling-parity foundational primitive — `ingest_sql_log` ingests pg_stat_statements CSV / generic JSONL into per-dataset `runtime_query_calls` + `runtime_redaction_log` tables. Foundation for `find_unused_columns`, `check_column_drop_safe`, `data_health_radar` — those land next.)
+- **Version:** 1.7.0 (Second Phase-1 sibling-parity tool — `find_unused_columns` reads `runtime_query_calls` and surfaces columns with zero or stale runtime traffic over a configurable window. Refuses with explicit error when no runtime data exists. PK + audit-field exclusion on by default. `check_column_drop_safe` + `data_health_radar` land next.)
 - **GitHub:** `jgravelle/jdatamunch-mcp`
 - **Python:** >=3.10
 - **Index format:** INDEX_VERSION = 3 (v1→v2→v3 migrations registered in `storage/migrations.py`; v3 is additive — new runtime tables created on first ingest, legacy v2 indexes load fine)
-- **Tool count:** 28 (1.6.0 adds `ingest_sql_log`)
-- **Tests:** 392 passed, 10 skipped (1.6.0)
+- **Tool count:** 29 (1.6.0 added `ingest_sql_log`; 1.7.0 adds `find_unused_columns`)
+- **Tests:** 406 passed, 10 skipped (1.7.0)
 
 ## Key Files
 ```
@@ -51,6 +51,7 @@ src/jdatamunch_mcp/
     list_repos.py              # list_repos: list GitHub repositories indexed via index_repo
     validate_index.py          # validate_index: integrity check on dataset (1.0.0)
     get_dataset_history.py     # get_dataset_history: profile snapshots over time (1.0.0)
+    find_unused_columns.py     # (1.7.0) Runtime-driven dead-column detection. Reads runtime_query_calls + dataset schema; surfaces columns with reason ∈ {zero_hits, stale, below_min_calls}. Refuses when no runtime data exists. PK + audit-field exclusion on by default. Audit patterns: created_at, updated_at, _dbt_*, etl_*, etc.
 ```
 
 ## Architecture Notes

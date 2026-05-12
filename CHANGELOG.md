@@ -1,5 +1,47 @@
 # Changelog
 
+## [1.7.0] — 2026-05-12 — `find_unused_columns` (Phase-1 #2)
+
+Second Phase-1 tool from the sibling-parity PRD. The first consumer of
+the `runtime_query_calls` table populated by `ingest_sql_log` (v1.6.0).
+Answers: *which columns in this dataset have no recent query traffic?*
+
+### New: `find_unused_columns` MCP tool
+
+Surfaces columns with zero or stale runtime reads over a configurable
+window. Three reason classifications:
+
+- **`zero_hits`** — column never appeared in any query, in or out of window
+- **`stale`** — column has appeared at some point, but never within the requested window
+- **`below_min_calls`** — column has hits in window but fewer than `min_calls`
+
+### Refusal-by-design
+
+When the dataset has zero rows in `runtime_query_calls`, the tool
+**refuses** with an explicit `refused_no_runtime_data` error rather
+than silently flagging every column. The hint directs the operator at
+`ingest_sql_log`. Mirrors the same guard in jcodemunch-mcp's
+`find_unused_paths`.
+
+### Defaults
+
+- **`exclude_pk`** (default true) — skips columns flagged as
+  `is_primary_key_candidate` by the static profiler. PKs are almost
+  always read by JOINs but may not always surface in extracted column
+  tokens.
+- **`exclude_audit`** (default true) — skips `created_at`,
+  `updated_at`, `_dbt_*`, `etl_*`, and other scaffolding patterns.
+- **`window_days=30`**, **`min_calls=0`** — single observed call counts
+  as used.
+
+### Stats
+
+- Tool count: 28 → 29
+- Tests: 392 → 406 (+14 new)
+
+Inspired by `find_unused_paths` in jcodemunch-mcp (see
+`C:/MCPs/PRD_sibling_parity_v1.md` §5.4).
+
 ## [1.6.0] — 2026-05-12 — Runtime SQL-log ingest (Phase-1 sibling-parity foundation)
 
 First Phase-1 deliverable from the sibling-parity PRD. Adds the

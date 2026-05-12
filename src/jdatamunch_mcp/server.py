@@ -31,6 +31,7 @@ from .tools.embed_dataset import embed_dataset
 from .tools.list_repos import list_repos
 from .tools.validate_index import validate_index
 from .runtime import ingest_sql_log_file
+from .tools.find_unused_columns import find_unused_columns
 from .tools.get_dataset_history import get_dataset_history
 from .tools.get_dataset_health import get_dataset_health
 from .tools.suggest_keys import suggest_keys
@@ -859,6 +860,45 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="find_unused_columns",
+            description=(
+                "Surface columns with zero or stale runtime traffic. Reads "
+                "runtime_query_calls (populated by ingest_sql_log) and surfaces "
+                "columns that haven't been queried within `window_days`. "
+                "Excludes primary-key candidates and audit fields (created_at / "
+                "updated_at / dbt_*) by default. Refuses to run with explicit "
+                "error when no runtime data has been ingested — would otherwise "
+                "trivially flag every column."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dataset_id": {"type": "string"},
+                    "window_days": {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Look-back window. Default 30.",
+                    },
+                    "min_calls": {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Floor for 'considered used' within window. Default 0.",
+                    },
+                    "exclude_pk": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Skip primary-key candidates. Default true.",
+                    },
+                    "exclude_audit": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Skip audit columns (created_at, updated_at, dbt_*, etc). Default true.",
+                    },
+                },
+                "required": ["dataset_id"],
+            },
+        ),
+        Tool(
             name="ingest_sql_log",
             description=(
                 "Ingest a SQL log file (pg_stat_statements CSV or generic JSONL, "
@@ -1137,6 +1177,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 redact=arguments.get("redact", True),
                 redact_patterns=arguments.get("redact_patterns"),
                 redact_skip_columns=arguments.get("redact_skip_columns"),
+                storage_path=storage_path,
+            )
+        elif name == "find_unused_columns":
+            result = await asyncio.to_thread(
+                find_unused_columns,
+                dataset_id=arguments["dataset_id"],
+                window_days=arguments.get("window_days", 30),
+                min_calls=arguments.get("min_calls", 0),
+                exclude_pk=arguments.get("exclude_pk", True),
+                exclude_audit=arguments.get("exclude_audit", True),
                 storage_path=storage_path,
             )
         elif name == "ingest_sql_log":
