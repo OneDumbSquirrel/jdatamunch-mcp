@@ -1,5 +1,56 @@
 # Changelog
 
+## [1.12.0] — 2026-05-12 — `find_similar_columns` (Phase-2 jData COMPLETE)
+
+Multi-signal cross-dataset column consolidation tool. Mirrors jcm's
+`find_similar_symbols` and jdoc's `find_similar_sections` — fuses
+several similarity signals into a composite score, clusters via
+union-find, classifies each cluster into a verdict tier.
+
+### Signal fusion
+
+| Signal      | Source                                                    |
+|-------------|-----------------------------------------------------------|
+| name        | Token-overlap Jaccard (snake + camel split + lowercase)   |
+| type        | 1.0 same type, 0.5 same numeric family, 0.0 otherwise     |
+| value       | Jaccard on top_values when both columns are low-cardinality |
+| cardinality | 1 - abs(ratio_a - ratio_b) where ratio = card/row_count   |
+| embedding   | Cosine on column embeddings (when present on both sides)  |
+
+Weighting:
+
+- with embeddings:    `emb 0.50 + name 0.20 + value 0.15 + type 0.10 + card 0.05`
+- without embeddings: `name 0.45 + value 0.30 + type 0.15 + card 0.10`
+
+### Verdict tiers
+
+- `near_duplicate`      — composite ≥ 0.85 and types match
+- `naming_drift`        — composite ≥ 0.70 and name_sim < 0.5
+- `parallel_definition` — composite ≥ 0.70 and name_sim ≥ 0.7
+- `overlapping_topic`   — composite ≥ 0.50
+
+### Use cases
+
+- Find duplicate columns to consolidate before a migration.
+- Surface naming drift across teams (`email` vs `email_address`).
+- Detect the same conceptual column spread across multiple datasets
+  (`users.email` and `customers.email`) that probably wants one source
+  of truth.
+
+`differs_by` breakdown per pair calls out which signals fired weakly so
+the verdict is auditable. Returns full clusters with members + pairs +
+per-cluster strongest verdict.
+
+### Stats
+
+- Tool count: 35 (`find_similar_columns` new)
+- Tests: 470 passed, 10 skipped (+15 new — 7 pure-function + 8 integration)
+
+This completes Phase 2 for jData. Remaining Phase-2 work: jDoc's
+`doc_health_radar` + `diff_doc_health_radar` and `get_doc_pr_risk_profile`.
+
+---
+
 ## [1.11.0] — 2026-05-12 — `data_health_radar` + `diff_data_health_radar`
 
 Six-axis health radar for tabular datasets, plus a pure-function diff

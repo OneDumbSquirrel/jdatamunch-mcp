@@ -37,6 +37,7 @@ from .tools.get_schema_impact import get_schema_impact
 from .tools.get_redaction_log import get_redaction_log
 from .tools.data_health_radar import data_health_radar
 from .tools.health_radar import diff_data_health_radar
+from .tools.find_similar_columns import find_similar_columns
 from .tools.get_dataset_history import get_dataset_history
 from .tools.get_dataset_health import get_dataset_health
 from .tools.suggest_keys import suggest_keys
@@ -1022,6 +1023,45 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="find_similar_columns",
+            description=(
+                "Multi-signal cross-dataset column consolidation. Fuses name "
+                "(token Jaccard), type, top-value overlap, cardinality similarity, "
+                "and (when present) embedding cosine into a composite score. "
+                "Clusters via union-find and classifies each cluster: near_duplicate, "
+                "naming_drift, parallel_definition, or overlapping_topic. Use to "
+                "find duplicate columns across datasets, surface naming drift "
+                "(`email` vs `email_address`), or detect the same conceptual "
+                "column spread across multiple datasets. Mirrors jcm's "
+                "find_similar_symbols."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "datasets": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Datasets to scan. Omit to scan every indexed dataset.",
+                    },
+                    "min_score": {
+                        "type": "number",
+                        "default": 0.5,
+                        "description": "Composite-score floor for surfacing pairs.",
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Max clusters returned. Default 50, capped at 200.",
+                    },
+                    "same_type_only": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Drop pairs where types don't match.",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="data_health_radar",
             description=(
                 "Six-axis health radar for a dataset: null_health, type_confidence, "
@@ -1380,6 +1420,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 source=arguments.get("source", "auto"),
                 redact=arguments.get("redact", True),
                 max_rows=arguments.get("max_rows", 100000),
+                storage_path=storage_path,
+            )
+        elif name == "find_similar_columns":
+            result = await asyncio.to_thread(
+                find_similar_columns,
+                datasets=arguments.get("datasets"),
+                min_score=arguments.get("min_score", 0.5),
+                top_n=arguments.get("top_n", 50),
+                same_type_only=arguments.get("same_type_only", False),
                 storage_path=storage_path,
             )
         elif name == "data_health_radar":
