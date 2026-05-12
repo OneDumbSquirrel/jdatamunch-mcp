@@ -1,7 +1,8 @@
 # jdatamunch-mcp — Project Brief
 
 ## Current State
-- **Version:** 1.12.0 (Phase-2 jData COMPLETE — `find_similar_columns`: multi-signal cross-dataset column consolidation. Fuses name (token Jaccard, snake+camel aware) + type + top-value Jaccard + cardinality + embedding cosine (when present). Union-find clustering; verdict tiers: near_duplicate / naming_drift / parallel_definition / overlapping_topic. Differs_by breakdown per pair makes verdict auditable. Mirrors jcm's find_similar_symbols.)
+- **Version:** 1.12.1 (Hygiene patch. `__version__` now derived from `importlib.metadata.version("jdatamunch-mcp")` in `__init__.py` — pyproject.toml is the single source of truth, the runtime/packaging version strings can no longer disagree. Mirrors jcm's pattern. Backstory: v1.12.0 shipped with the hardcoded literal stuck at 1.9.0, three minors stale.)
+- **Version (v1.12.0):** Phase-2 jData COMPLETE — `find_similar_columns`: multi-signal cross-dataset column consolidation. Fuses name (token Jaccard, snake+camel aware) + type + top-value Jaccard + cardinality + embedding cosine (when present). Union-find clustering; verdict tiers: near_duplicate / naming_drift / parallel_definition / overlapping_topic. Differs_by breakdown per pair makes verdict auditable. Mirrors jcm's find_similar_symbols.
 - **GitHub:** `jgravelle/jdatamunch-mcp`
 - **Python:** >=3.10
 - **Index format:** INDEX_VERSION = 3 (v1→v2→v3 migrations registered in `storage/migrations.py`; v3 is additive — new runtime tables created on first ingest, legacy v2 indexes load fine)

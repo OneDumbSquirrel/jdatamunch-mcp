@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.12.1] - 2026-05-12 - drift-proof __version__ via importlib.metadata
+
+`src/jdatamunch_mcp/__init__.py` now derives `__version__` from
+`importlib.metadata.version("jdatamunch-mcp")` instead of a hardcoded
+literal. pyproject.toml is the single source of truth; the wheel's
+metadata is read at import time, so the runtime version string and
+the packaging version string cannot disagree by construction.
+
+Mirrors the jcodemunch-mcp pattern (in place since v1.84.0) and
+jdocmunch-mcp v1.63.2.
+
+Backstory: v1.12.0 shipped with `__version__` hardcoded at 1.9.0,
+three minors stale. Nothing failed because the runtime version string
+is rarely consulted; the bug would have surfaced as wrong telemetry
+labels or wrong baseline filenames in future work that branched on it.
+
+Source-checkout callers without `pip install` see
+`__version__ = "unknown"`.
+
+No tool, schema, or wire-format changes.
+
 ## [1.12.0] — 2026-05-12 — `find_similar_columns` (Phase-2 jData COMPLETE)
 
 Multi-signal cross-dataset column consolidation tool. Mirrors jcm's
