@@ -1,5 +1,59 @@
 # Changelog
 
+## [1.9.0] — 2026-05-12 — `get_schema_impact` (Phase-1 COMPLETE)
+
+Fourth and final Phase-1 sibling-parity tool. Walks the inferred FK
+graph to surface transitive impact of a column-level schema change.
+Inspired by jcodemunch-mcp's `get_blast_radius`, ported to jData's
+FK-graph + runtime-traffic shape.
+
+### New: `get_schema_impact` MCP tool
+
+Three change kinds:
+
+- **`drop_column`** (default) — surface every dataset / runtime query
+  that *might* reference this column.
+- **`rename_column`** — same surfaces; `recommended_action` references
+  `new_name` for cascade planning.
+- **`retype_column`** — additionally checks `new_type` compatibility
+  against each FK-related column's type. Cross-family changes (e.g.
+  `integer` → `string`) surface in `summary.type_mismatches`.
+
+### Output
+
+- `direct_impact` (depth 1) — fk_source, fk_target,
+  cross_dataset_name_match, runtime_traffic entries.
+- `transitive_impact` (depth ≥ 2) — BFS through the FK graph,
+  capped at `_MAX_IMPACT_ITEMS = 50`.
+- `summary` — `datasets_affected`, `fk_edges_broken`,
+  `runtime_calls_in_window`, `type_mismatches`,
+  `cross_dataset_name_matches`.
+- `blast_score` ∈ [0, 1] — soft-normalised against index size so a
+  5-edge impact in a 50-dataset warehouse scores higher than the same
+  5 in a 500-dataset one.
+- `recommended_action` — verb tracks the change kind ("drop" / "rename
+  to X" / "retype to Y").
+
+### Stats
+
+- Tool count: 30 → 31
+- Tests: 418 → 434 (+16 new)
+
+### Phase-1 sibling-parity batch complete
+
+| Tool | Version |
+|---|---|
+| `ingest_sql_log` (foundational runtime primitive) | v1.6.0 |
+| `find_unused_columns` | v1.7.0 |
+| `check_column_drop_safe` (killer feature) | v1.8.0 |
+| `get_schema_impact` | v1.9.0 |
+
+Phase 2 (deferred until user signal): `data_health_radar`,
+`find_similar_columns`, `data_pr_risk_profile`, `get_redaction_log`.
+
+Inspired by `get_blast_radius` in jcodemunch-mcp (see
+`C:/MCPs/PRD_sibling_parity_v1.md` §5.3).
+
 ## [1.8.0] — 2026-05-12 — `check_column_drop_safe` (Phase-1 #3 — killer feature)
 
 The killer feature of the Phase-1 sibling-parity batch. Composite

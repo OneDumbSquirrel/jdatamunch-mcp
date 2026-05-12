@@ -33,6 +33,7 @@ from .tools.validate_index import validate_index
 from .runtime import ingest_sql_log_file
 from .tools.find_unused_columns import find_unused_columns
 from .tools.check_column_drop_safe import check_column_drop_safe
+from .tools.get_schema_impact import get_schema_impact
 from .tools.get_dataset_history import get_dataset_history
 from .tools.get_dataset_health import get_dataset_health
 from .tools.suggest_keys import suggest_keys
@@ -861,6 +862,48 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="get_schema_impact",
+            description=(
+                "Transitive impact of a column-level schema change (drop_column, "
+                "rename_column, retype_column). Walks the inferred FK graph to "
+                "max_depth, surfaces direct + transitive hits across datasets, "
+                "and normalises blast_score to [0, 1]. For retype_column, also "
+                "flags type_mismatch entries at FK edges whose partner type "
+                "wouldn't survive the retype. Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dataset_id": {"type": "string"},
+                    "column": {"type": "string", "description": "Column name (case-insensitive)."},
+                    "kind": {
+                        "type": "string",
+                        "enum": ["drop_column", "rename_column", "retype_column"],
+                        "default": "drop_column",
+                    },
+                    "new_name": {
+                        "type": "string",
+                        "description": "Required for rename_column.",
+                    },
+                    "new_type": {
+                        "type": "string",
+                        "description": "Required for retype_column. e.g. integer / string / float.",
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "default": 3,
+                        "description": "BFS depth over the inferred FK graph.",
+                    },
+                    "window_days": {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Runtime traffic look-back.",
+                    },
+                },
+                "required": ["dataset_id", "column"],
+            },
+        ),
+        Tool(
             name="check_column_drop_safe",
             description=(
                 "Composite preflight: is this column safe to drop? Fuses four "
@@ -1203,6 +1246,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 redact=arguments.get("redact", True),
                 redact_patterns=arguments.get("redact_patterns"),
                 redact_skip_columns=arguments.get("redact_skip_columns"),
+                storage_path=storage_path,
+            )
+        elif name == "get_schema_impact":
+            result = await asyncio.to_thread(
+                get_schema_impact,
+                dataset_id=arguments["dataset_id"],
+                column=arguments["column"],
+                kind=arguments.get("kind", "drop_column"),
+                new_name=arguments.get("new_name"),
+                new_type=arguments.get("new_type"),
+                max_depth=arguments.get("max_depth", 3),
+                window_days=arguments.get("window_days", 30),
                 storage_path=storage_path,
             )
         elif name == "check_column_drop_safe":
