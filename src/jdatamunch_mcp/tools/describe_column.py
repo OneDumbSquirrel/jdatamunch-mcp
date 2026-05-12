@@ -6,6 +6,12 @@ from typing import Optional
 
 from ..config import get_index_path, HARD_CAP_DESCRIBE_COLUMN_TOP_N, HARD_CAP_DESCRIBE_COLUMN_BINS
 from ..profiler.histogram import compute_histogram
+from ..redact import (
+    merge_summary,
+    redact_scalar_list,
+    redact_value_distribution,
+    redaction_meta,
+)
 from ..storage.data_store import DataStore
 from ..storage.token_tracker import estimate_savings, record_savings, cost_avoided
 
@@ -15,12 +21,19 @@ def describe_column(
     column: str,
     top_n: int = 20,
     histogram_bins: int = 10,
+    redact: bool = True,
+    redact_patterns: Optional[list] = None,
     storage_path: Optional[str] = None,
 ) -> dict:
     """Return a deep profile of a single column.
 
     Full value distribution for low-cardinality; histogram bins for numeric;
     temporal range for datetime.
+
+    ``value_distribution``, ``top_values``, and ``sample_values`` are scrubbed
+    for PII / credentials by default. Counts and percentages are never altered.
+    Pass ``redact=False`` to inspect raw cell values when working with data
+    you own.
     """
     t0 = time.time()
     top_n = min(max(1, top_n), HARD_CAP_DESCRIBE_COLUMN_TOP_N)
@@ -41,6 +54,13 @@ def describe_column(
     if col_data is None:
         return {"error": f"INVALID_COLUMN: column {col_name!r} not found in dataset {dataset!r}"}
 
+    sample_values = col_data.get("sample_values", []) or []
+    sample_summary: Optional[dict] = None
+    if redact and sample_values:
+        sample_values, sample_summary = redact_scalar_list(
+            sample_values, custom_patterns=redact_patterns
+        )
+
     result: dict = {
         "id": f"{dataset}::{col_name}#column",
         "name": col_name,
@@ -51,8 +71,11 @@ def describe_column(
         "cardinality": col_data["cardinality"],
         "cardinality_is_exact": col_data["cardinality_is_exact"],
         "is_unique": col_data["is_unique"],
-        "sample_values": col_data.get("sample_values", []),
+        "sample_values": sample_values,
     }
+
+    vd_summary: Optional[dict] = None
+    tv_summary: Optional[dict] = None
 
     # Value distribution (for low-cardinality)
     if col_data.get("value_index"):
@@ -63,19 +86,29 @@ def describe_column(
             reverse=True,
         )
         total = sum(c for _, c in sorted_vals)
-        result["value_distribution"] = [
+        value_distribution = [
             {"value": v, "count": c, "pct": round(c / total * 100, 2) if total else 0}
             for v, c in sorted_vals[:top_n]
         ]
+        if redact:
+            value_distribution, vd_summary = redact_value_distribution(
+                value_distribution, custom_patterns=redact_patterns
+            )
+        result["value_distribution"] = value_distribution
         result["unique_values_truncated"] = len(sorted_vals) > top_n
 
     elif col_data.get("top_values"):
         total = sum(tv["count"] for tv in col_data["top_values"])
-        result["top_values"] = [
+        top_values = [
             {"value": tv["value"], "count": tv["count"],
              "pct": round(tv["count"] / total * 100, 2) if total else 0}
             for tv in col_data["top_values"][:top_n]
         ]
+        if redact:
+            top_values, tv_summary = redact_value_distribution(
+                top_values, custom_patterns=redact_patterns
+            )
+        result["top_values"] = top_values
 
     # Numeric stats + histogram
     if col_data["type"] in ("integer", "float"):
@@ -112,6 +145,8 @@ def describe_column(
     tokens_saved = estimate_savings(idx.source_size_bytes, response_bytes)
     total_saved = record_savings(tokens_saved, str(store.base_path), tool="describe_column")
 
+    combined_summary = merge_summary(sample_summary or {}, vd_summary or {}, tv_summary or {})
+
     return {
         "result": result,
         "_meta": {
@@ -119,5 +154,10 @@ def describe_column(
             "tokens_saved": tokens_saved,
             "total_tokens_saved": total_saved,
             **cost_avoided(tokens_saved, total_saved),
+            "redaction": redaction_meta(
+                applied=redact,
+                summary=combined_summary,
+                custom_patterns=redact_patterns,
+            ),
         },
     }

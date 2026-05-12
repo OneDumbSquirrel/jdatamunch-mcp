@@ -22,6 +22,7 @@ import time
 from typing import Optional
 
 from ..config import get_index_path
+from ..redact import redact_rows, redaction_meta
 from ..storage.data_store import DataStore
 
 
@@ -68,6 +69,9 @@ def run_sql(
     sql: str,
     datasets: list,
     limit: int = _MAX_ROWS_RETURNED,
+    redact: bool = True,
+    redact_patterns: Optional[list] = None,
+    redact_skip_columns: Optional[list] = None,
     storage_path: Optional[str] = None,
 ) -> dict:
     """Execute a read-only SELECT against one or more indexed datasets (B1).
@@ -127,6 +131,14 @@ def run_sql(
                 if len(rows) >= limit:
                     break
 
+            redaction_summary: Optional[dict] = None
+            if redact:
+                rows, redaction_summary = redact_rows(
+                    rows,
+                    custom_patterns=redact_patterns,
+                    skip_columns=redact_skip_columns,
+                )
+
             return {
                 "result": {
                     "datasets": datasets,
@@ -135,7 +147,14 @@ def run_sql(
                     "returned": len(rows),
                     "row_cap": limit,
                 },
-                "_meta": {"timing_ms": round((time.perf_counter() - t0) * 1000, 1)},
+                "_meta": {
+                    "timing_ms": round((time.perf_counter() - t0) * 1000, 1),
+                    "redaction": redaction_meta(
+                        applied=redact,
+                        summary=redaction_summary,
+                        custom_patterns=redact_patterns,
+                    ),
+                },
             }
     except sqlite3.OperationalError as e:
         msg = str(e)

@@ -5,6 +5,7 @@ import time
 from typing import Optional
 
 from ..config import get_index_path, MAX_COLUMNS_ROWS
+from ..redact import redact_rows, redaction_meta
 from ..storage.data_store import DataStore
 from ..storage.sqlite_store import query_sample
 from ..storage.token_tracker import estimate_savings, record_savings, cost_avoided
@@ -16,6 +17,9 @@ def sample_rows(
     method: str = "head",
     columns: Optional[list] = None,
     seed: Optional[int] = None,
+    redact: bool = True,
+    redact_patterns: Optional[list] = None,
+    redact_skip_columns: Optional[list] = None,
     storage_path: Optional[str] = None,
 ) -> dict:
     """Return a sample of rows from the dataset.
@@ -23,6 +27,9 @@ def sample_rows(
     Useful for quickly understanding data shape without prior knowledge.
     method: "head" (first rows), "tail" (last rows), or "random"
     seed: when method='random', makes selection deterministic (A9).
+
+    Sampled cells are scrubbed for PII / credentials by default. Pass
+    ``redact=False`` to see raw values when working with data you own.
     """
     t0 = time.time()
 
@@ -70,6 +77,14 @@ def sample_rows(
         seed=seed,
     )
 
+    redaction_summary: Optional[dict] = None
+    if redact:
+        rows, redaction_summary = redact_rows(
+            rows,
+            custom_patterns=redact_patterns,
+            skip_columns=redact_skip_columns,
+        )
+
     response_bytes = len(json.dumps(rows).encode("utf-8"))
     tokens_saved = estimate_savings(idx.source_size_bytes, response_bytes)
     total_saved = record_savings(tokens_saved, str(store.base_path), tool="sample_rows")
@@ -88,5 +103,10 @@ def sample_rows(
     }
     if column_truncation:
         meta["column_truncation"] = column_truncation
+    meta["redaction"] = redaction_meta(
+        applied=redact,
+        summary=redaction_summary,
+        custom_patterns=redact_patterns,
+    )
 
     return {"result": result_body, "_meta": meta}

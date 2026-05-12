@@ -5,6 +5,7 @@ import time
 from typing import Optional
 
 from ..config import get_index_path, HARD_CAP_AGGREGATE_LIMIT
+from ..redact import redact_rows, redaction_meta
 from ..security import validate_filter
 from ..storage.data_store import DataStore
 from ..storage import result_cache
@@ -22,6 +23,9 @@ def aggregate(
     order_dir: str = "desc",
     limit: int = 50,
     approximate: bool = False,
+    redact: bool = True,
+    redact_patterns: Optional[list] = None,
+    redact_skip_columns: Optional[list] = None,
     storage_path: Optional[str] = None,
 ) -> dict:
     """Compute server-side aggregations on a dataset.
@@ -73,6 +77,26 @@ def aggregate(
         cached.setdefault("_meta", {})
         cached["_meta"]["cache_hit"] = True
         cached["_meta"]["timing_ms"] = round((time.time() - t0) * 1000, 1)
+        # Apply redaction to the cached payload — the cache stores raw values
+        # so the policy is enforced at read time, not write time. Means
+        # toggling redact=False on a cache hit still returns raw cells.
+        cached_summary: Optional[dict] = None
+        if redact:
+            agg_payload = cached.get("result") or {}
+            grp = agg_payload.get("groups") or []
+            if grp:
+                grp_red, cached_summary = redact_rows(
+                    grp,
+                    custom_patterns=redact_patterns,
+                    skip_columns=redact_skip_columns,
+                )
+                agg_payload["groups"] = grp_red
+                cached["result"] = agg_payload
+        cached["_meta"]["redaction"] = redaction_meta(
+            applied=redact,
+            summary=cached_summary,
+            custom_patterns=redact_patterns,
+        )
         return cached
 
     try:
@@ -95,6 +119,8 @@ def aggregate(
     tokens_saved = estimate_savings(idx.source_size_bytes, response_bytes)
     total_saved = record_savings(tokens_saved, str(store.base_path), tool="aggregate")
 
+    # Cache the raw (un-redacted) response so the redaction policy can change
+    # per-call without poisoning the cache.
     response = {
         "result": agg_result,
         "_meta": {
@@ -106,4 +132,22 @@ def aggregate(
         },
     }
     result_cache.put(store.dataset_dir(dataset), cache_key, response)
+
+    redaction_summary: Optional[dict] = None
+    if redact and agg_result.get("groups"):
+        groups_red, redaction_summary = redact_rows(
+            agg_result["groups"],
+            custom_patterns=redact_patterns,
+            skip_columns=redact_skip_columns,
+        )
+        agg_result = dict(agg_result)
+        agg_result["groups"] = groups_red
+        response = dict(response)
+        response["result"] = agg_result
+        response = {**response, "_meta": dict(response["_meta"])}
+    response["_meta"]["redaction"] = redaction_meta(
+        applied=redact,
+        summary=redaction_summary,
+        custom_patterns=redact_patterns,
+    )
     return response

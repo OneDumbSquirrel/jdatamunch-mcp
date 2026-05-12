@@ -1,5 +1,47 @@
 # Changelog
 
+## [1.5.0] — Cell-level redaction on the output side
+
+Tabular tools now scrub PII and credentials from cells before returning
+them to MCP clients. CSV / Excel / Parquet / JSONL data routinely carry
+emails, SSNs, credit-card numbers, API keys, and PEM bodies in raw
+columns — those cells would otherwise flow straight into LLM context
+where they may be cached, logged, or reflected to a tool downstream.
+The default policy is ON; callers opt out per call.
+
+### New
+- **`src/jdatamunch_mcp/redact.py`** — single-chokepoint redaction module.
+  Built-in patterns: `email`, `ssn` (SSA-rule validated), `credit_card`
+  (Luhn-checked post-match), `jwt`, `private_key` (full PEM blocks),
+  `aws_access_key`, `github_pat`, `slack_token`, `api_key_prefixed`
+  (Stripe `sk_live_…` / `sk_test_…` / `rk_…`), `api_key_openai` (`sk-…`).
+  Numeric cells are never scrubbed — agents rarely treat numbers as PII.
+- **`redact`, `redact_patterns`, `redact_skip_columns`** params on
+  `get_rows`, `sample_rows`, `run_sql`, `aggregate`, and `describe_column`.
+  `redact=True` by default. `redact_patterns` layers additional Python
+  regex onto the built-in set; invalid patterns are silently skipped and
+  surfaced via `_meta.redaction.invalid_custom_patterns`.
+  `redact_skip_columns` exempts named columns (e.g. an `email_hashed`
+  column where the email pattern would false-positive).
+- **`_meta.redaction`** block on every wired tool response —
+  `{"applied": bool, "cells_redacted": int, "patterns_matched": {kind: count}}`.
+  Surfaced even when `applied=False` so the absence of redaction is
+  auditable from the wire.
+- **34 new tests** (`test_redact.py` + `test_redaction_e2e.py`).
+  351 passed, 1 skipped — fully backward-compatible.
+
+### Notes
+- `aggregate` caches the raw, un-redacted result; the redaction policy
+  is enforced at read time so flipping `redact=False` on a cache hit
+  still returns raw cells.
+- `describe_column` redacts `value_distribution`, `top_values`, and
+  `sample_values`. Numeric stats (min / max / mean / median / histogram)
+  are never altered.
+- `search_data` is deliberately not wired — the user is explicitly
+  searching, so redacting matches would defeat the search.
+
+---
+
 ## [1.4.0] — Phase C (optional post-V1 polish)
 
 Closes the Phase C list in `todo.md`. 317 tests passing. Fully backward-compatible.

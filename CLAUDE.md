@@ -1,11 +1,12 @@
 # jdatamunch-mcp — Project Brief
 
 ## Current State
-- **Version:** 1.4.0 (Phase C complete — full Phase A+B+C roadmap shipped)
+- **Version:** 1.5.0 (Cell-level redaction — `get_rows`/`sample_rows`/`run_sql`/`aggregate`/`describe_column` scrub PII+credentials by default; opt out per call via `redact=False`)
 - **GitHub:** `jgravelle/jdatamunch-mcp`
 - **Python:** >=3.10
 - **Index format:** INDEX_VERSION = 2 (v1 → v2 migration registered in `storage/migrations.py`)
-- **Tool count:** 27 (Phase C extends existing tools: `aggregate(approximate=True)`, `list_datasets` exposes `fingerprint`, `get_session_stats` exposes `per_tool`, `summarize_dataset` adds domain classification)
+- **Tool count:** 27 (1.5.0 adds `redact`/`redact_patterns`/`redact_skip_columns` params to 5 tools, no new tool surfaces)
+- **Tests:** 351 passed, 1 skipped (1.5.0)
 
 ## Key Files
 ```
@@ -13,6 +14,7 @@ src/jdatamunch_mcp/
   server.py                    # MCP tool definitions + call_tool dispatcher
   config.py                    # Index path, max rows env vars
   security.py                  # Path validation
+  redact.py                    # (1.5.0) Cell-level redaction. Built-in patterns: email, ssn (SSA-rule), credit_card (Luhn-checked), jwt, private_key (PEM blocks), aws_access_key, github_pat, slack_token, api_key_prefixed (Stripe), api_key_openai. Public API: redact_rows / redact_value_distribution / redact_scalar_list / merge_summary / redaction_meta. Wired into get_rows/sample_rows/run_sql/aggregate/describe_column with redact=True default and `_meta.redaction` audit block on every response. Numeric cells are never scrubbed.
   embeddings.py                # Provider detection (sentence-transformers/Gemini/OpenAI), embed_texts(), cosine_similarity()
   parser/
     normalize.py               # Cross-parser native→string normalization (1.0.0)

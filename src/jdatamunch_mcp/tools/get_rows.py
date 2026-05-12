@@ -5,6 +5,7 @@ import time
 from typing import Optional
 
 from ..config import get_index_path, MAX_COLUMNS_ROWS
+from ..redact import redact_rows, redaction_meta
 from ..security import validate_filter
 from ..storage.data_store import DataStore
 from ..storage.sqlite_store import query_rows, MAX_ROWS_RETURNED
@@ -19,12 +20,21 @@ def get_rows(
     order_dir: str = "asc",
     limit: int = 50,
     offset: int = 0,
+    redact: bool = True,
+    redact_patterns: Optional[list] = None,
+    redact_skip_columns: Optional[list] = None,
     storage_path: Optional[str] = None,
 ) -> dict:
     """Return filtered rows from the dataset via parameterized SQL queries.
 
     All column names are validated against the schema; values are SQL parameters
     (no injection surface).
+
+    Row cells are scrubbed for PII / credentials before return (``redact=True``
+    by default). Pass ``redact=False`` for legitimate analytics on data you own,
+    or ``redact_patterns=['<regex>', ...]`` to layer custom regex onto the
+    built-in set. ``redact_skip_columns`` exempts named columns from scrubbing.
+    A summary is reported in ``_meta.redaction``.
     """
     t0 = time.time()
 
@@ -93,6 +103,15 @@ def get_rows(
     except ValueError as e:
         return {"error": str(e)}
 
+    redaction_summary: Optional[dict] = None
+    if redact:
+        rows, redaction_summary = redact_rows(
+            query_result["rows"],
+            custom_patterns=redact_patterns,
+            skip_columns=redact_skip_columns,
+        )
+        query_result["rows"] = rows
+
     response_bytes = len(json.dumps(query_result["rows"]).encode("utf-8"))
     tokens_saved = estimate_savings(idx.source_size_bytes, response_bytes)
     total_saved = record_savings(tokens_saved, str(store.base_path), tool="get_rows")
@@ -105,6 +124,11 @@ def get_rows(
     }
     if column_truncation:
         meta["column_truncation"] = column_truncation
+    meta["redaction"] = redaction_meta(
+        applied=redact,
+        summary=redaction_summary,
+        custom_patterns=redact_patterns,
+    )
 
     return {
         "result": query_result,

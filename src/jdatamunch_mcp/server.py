@@ -194,6 +194,16 @@ async def list_tools() -> list[Tool]:
                         "description": "Bins for numeric histograms (default 10)",
                         "default": 10,
                     },
+                    "redact": {
+                        "type": "boolean",
+                        "description": "Scrub PII / credentials from value_distribution, top_values, and sample_values (default true). Numeric stats and counts are never altered. Set false for raw values when working with data you own.",
+                        "default": True,
+                    },
+                    "redact_patterns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Additional Python regex patterns to redact on top of the built-in set.",
+                    },
                 },
                 "required": ["dataset", "column"],
             },
@@ -295,6 +305,21 @@ async def list_tools() -> list[Tool]:
                         "description": "Pagination offset (default 0)",
                         "default": 0,
                     },
+                    "redact": {
+                        "type": "boolean",
+                        "description": "Scrub PII / credentials (emails, SSNs, Luhn-valid credit cards, JWTs, API keys, PEM blocks, AWS keys, GitHub/Slack tokens) from row cells before return (default true). Numeric cells are never altered. _meta.redaction reports cells_redacted + per-pattern counts.",
+                        "default": True,
+                    },
+                    "redact_patterns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Additional Python regex patterns to layer on top of the built-in set. Invalid patterns are silently skipped (reported in _meta.redaction.invalid_custom_patterns).",
+                    },
+                    "redact_skip_columns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Column names to exempt from redaction (e.g. an `email_hashed` column where the email pattern would false-positive).",
+                    },
                 },
                 "required": ["dataset"],
             },
@@ -358,6 +383,21 @@ async def list_tools() -> list[Tool]:
                         "description": "Approximate-mode aggregation (C1). Routes count_distinct → HyperLogLog (~2% error), median → t-digest (~1% error), sum/avg → sampled estimator with 95% confidence interval. Whole-dataset only.",
                         "default": False,
                     },
+                    "redact": {
+                        "type": "boolean",
+                        "description": "Scrub PII / credentials from group-by column values (default true). Aggregate values (counts, sums, etc.) are never altered.",
+                        "default": True,
+                    },
+                    "redact_patterns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Additional Python regex patterns to layer on top of the built-in set.",
+                    },
+                    "redact_skip_columns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Group-by column names to exempt from redaction.",
+                    },
                 },
                 "required": ["dataset", "aggregations"],
             },
@@ -394,6 +434,21 @@ async def list_tools() -> list[Tool]:
                     "seed": {
                         "type": "integer",
                         "description": "Deterministic seed for method='random' (omitted = non-deterministic)",
+                    },
+                    "redact": {
+                        "type": "boolean",
+                        "description": "Scrub PII / credentials from sampled cells before return (default true).",
+                        "default": True,
+                    },
+                    "redact_patterns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Additional Python regex patterns to layer on top of the built-in set.",
+                    },
+                    "redact_skip_columns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Column names to exempt from redaction.",
                     },
                 },
                 "required": ["dataset"],
@@ -783,6 +838,21 @@ async def list_tools() -> list[Tool]:
                         "description": "Row cap (default 500, hard max 500)",
                         "default": 500,
                     },
+                    "redact": {
+                        "type": "boolean",
+                        "description": "Scrub PII / credentials from result cells before return (default true).",
+                        "default": True,
+                    },
+                    "redact_patterns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Additional Python regex patterns to layer on top of the built-in set.",
+                    },
+                    "redact_skip_columns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Result column names to exempt from redaction.",
+                    },
                 },
                 "required": ["sql", "datasets"],
             },
@@ -858,6 +928,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 column=arguments["column"],
                 top_n=arguments.get("top_n", 20),
                 histogram_bins=arguments.get("histogram_bins", 10),
+                redact=arguments.get("redact", True),
+                redact_patterns=arguments.get("redact_patterns"),
                 storage_path=storage_path,
             )
         elif name == "search_data":
@@ -881,6 +953,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 order_dir=arguments.get("order_dir", "asc"),
                 limit=arguments.get("limit", 50),
                 offset=arguments.get("offset", 0),
+                redact=arguments.get("redact", True),
+                redact_patterns=arguments.get("redact_patterns"),
+                redact_skip_columns=arguments.get("redact_skip_columns"),
                 storage_path=storage_path,
             )
         elif name == "aggregate":
@@ -895,6 +970,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 order_dir=arguments.get("order_dir", "desc"),
                 limit=arguments.get("limit", 50),
                 approximate=arguments.get("approximate", False),
+                redact=arguments.get("redact", True),
+                redact_patterns=arguments.get("redact_patterns"),
+                redact_skip_columns=arguments.get("redact_skip_columns"),
                 storage_path=storage_path,
             )
         elif name == "sample_rows":
@@ -905,6 +983,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 method=arguments.get("method", "head"),
                 columns=arguments.get("columns"),
                 seed=arguments.get("seed"),
+                redact=arguments.get("redact", True),
+                redact_patterns=arguments.get("redact_patterns"),
+                redact_skip_columns=arguments.get("redact_skip_columns"),
                 storage_path=storage_path,
             )
         elif name == "delete_dataset":
@@ -1013,6 +1094,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 sql=arguments["sql"],
                 datasets=arguments["datasets"],
                 limit=arguments.get("limit", 500),
+                redact=arguments.get("redact", True),
+                redact_patterns=arguments.get("redact_patterns"),
+                redact_skip_columns=arguments.get("redact_skip_columns"),
                 storage_path=storage_path,
             )
         else:
