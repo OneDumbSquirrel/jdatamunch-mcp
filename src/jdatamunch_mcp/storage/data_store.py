@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-INDEX_VERSION = 2  # bumped from 1: adds quantiles, std_dev, semantic_type, type_confidence, HLL
+INDEX_VERSION = 3  # v3 (1.6.0): runtime ingest tables (runtime_query_calls + runtime_redaction_log) materialised on first load
 
 
 @dataclass

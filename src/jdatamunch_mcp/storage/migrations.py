@@ -46,8 +46,23 @@ def _migrate_v1_to_v2(d: dict) -> dict:
     return d
 
 
+def _migrate_v2_to_v3(d: dict) -> dict:
+    """v2 → v3 (1.6.0): runtime ingest tables.
+
+    Purely additive at the JSON-index level — no per-column fields
+    change. The new ``runtime_query_calls`` and ``runtime_redaction_log``
+    tables live in the per-dataset SQLite store and are created on
+    first ``ingest_sql_log_file`` call via
+    :func:`runtime.tables.ensure_runtime_tables`. Legacy v2 indexes load
+    fine; their SQLite stores simply lack the tables until first ingest.
+    """
+    d["index_version"] = 3
+    return d
+
+
 _MIGRATIONS: dict[int, Callable[[dict], dict]] = {
     1: _migrate_v1_to_v2,
+    2: _migrate_v2_to_v3,
 }
 
 

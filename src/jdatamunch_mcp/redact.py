@@ -301,6 +301,135 @@ def merge_summary(*summaries: dict) -> dict:
     return out
 
 
+# --------------------------------------------------------------------------- #
+# Trace-level redaction (v1.6.0 — runtime ingest)                             #
+# --------------------------------------------------------------------------- #
+# Cell-level redaction scrubs PII from one column's worth of values. Trace
+# redaction scrubs PII from free-form text — SQL query bodies or log messages
+# — by stripping the dynamic parts (string literals, numeric literals) AND
+# applying the cell registry to whatever remains. Designed for the runtime
+# ingest pipeline (v1.6.0 ingest_sql_log) where queries arrive as raw text
+# that may contain embedded credentials, emails, or PII in WHERE clauses.
+
+# Standard SQL single-quoted string literal. Handles both backslash escapes
+# (``\'``) and SQL-standard doubled single quotes (``''``).
+_SQL_STRING_LIT_RE = re.compile(r"'(?:[^'\\]|\\.|'')*'")
+
+# Numeric literal: int, decimal, or scientific notation. Word-boundary on
+# each side keeps us out of identifiers like ``col_123``.
+_SQL_NUMERIC_LIT_RE = re.compile(r"\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b")
+
+# IPv4 — added for trace messages (log lines), not used by SQL.
+_IPV4_RE = re.compile(
+    r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\b"
+)
+
+
+def redact_sql_query_text(
+    query: str,
+    *,
+    scrub_string_literals: bool = True,
+    scrub_numeric_literals: bool = True,
+    enabled_patterns: Optional[Iterable[str]] = None,
+    custom_patterns: Optional[Iterable[str]] = None,
+    replacement: str = "[REDACTED:{kind}]",
+) -> tuple[str, dict]:
+    """Scrub a SQL query body for safe storage in the runtime trace tables.
+
+    Strategy:
+      1. Replace ``'literal'`` and ``"literal"`` string contents with ``?``
+         so the query *shape* survives but the values don't. Counts each
+         under ``sql_string_literal``.
+      2. Replace numeric literals (``42``, ``3.14``, ``1.5e-3``) with ``?``.
+         Counts under ``sql_numeric_literal``.
+      3. Run the cell-PII registry on the remainder, catching tokens that
+         survive (e.g. an API key concatenated into an identifier).
+
+    Returns ``(redacted_query, summary)``. Summary keys match the cell
+    redactors: ``cells_redacted`` (total substitution count) and
+    ``patterns_matched`` (per-kind counts).
+    """
+    out = query
+    pattern_counts: dict[str, int] = {}
+    cells_redacted = 0
+
+    if scrub_string_literals:
+        def _str_sub(m: "re.Match[str]") -> str:
+            nonlocal cells_redacted
+            pattern_counts["sql_string_literal"] = pattern_counts.get("sql_string_literal", 0) + 1
+            cells_redacted += 1
+            return "'?'"
+        out = _SQL_STRING_LIT_RE.sub(_str_sub, out)
+
+    if scrub_numeric_literals:
+        def _num_sub(m: "re.Match[str]") -> str:
+            nonlocal cells_redacted
+            pattern_counts["sql_numeric_literal"] = pattern_counts.get("sql_numeric_literal", 0) + 1
+            cells_redacted += 1
+            return "?"
+        out = _SQL_NUMERIC_LIT_RE.sub(_num_sub, out)
+
+    # Cell registry on what survives. Default to a tight set — credit_card
+    # is intentionally OFF for SQL-text because Luhn-valid 13–19 digit
+    # sequences inside arbitrary tokens are nearly always false positives
+    # once literals are already scrubbed.
+    en_default = (DEFAULT_ENABLED - {"credit_card"}) if enabled_patterns is None else enabled_patterns
+    active, invalid = _active_patterns(en_default, custom_patterns)
+    out, kinds_hit = _redact_str(out, active, replacement)
+    for kind in kinds_hit:
+        pattern_counts[kind] = pattern_counts.get(kind, 0) + 1
+    cells_redacted += len(kinds_hit)
+
+    summary: dict = {
+        "cells_redacted": cells_redacted,
+        "patterns_matched": pattern_counts,
+    }
+    if invalid:
+        summary["invalid_custom_patterns"] = invalid
+    return out, summary
+
+
+def redact_trace_message(
+    text: str,
+    *,
+    scrub_ipv4: bool = True,
+    enabled_patterns: Optional[Iterable[str]] = None,
+    custom_patterns: Optional[Iterable[str]] = None,
+    replacement: str = "[REDACTED:{kind}]",
+) -> tuple[str, dict]:
+    """Scrub a free-form trace / log message.
+
+    Applies the cell-PII registry plus an optional IPv4 sweep. Use this
+    for stack-frame messages, generic log lines, or any non-SQL text
+    arriving at the ingest chokepoint.
+    """
+    out = text
+    pattern_counts: dict[str, int] = {}
+    cells_redacted = 0
+
+    if scrub_ipv4:
+        def _ipv4_sub(m: "re.Match[str]") -> str:
+            nonlocal cells_redacted
+            pattern_counts["ipv4"] = pattern_counts.get("ipv4", 0) + 1
+            cells_redacted += 1
+            return replacement.format(kind="ipv4")
+        out = _IPV4_RE.sub(_ipv4_sub, out)
+
+    active, invalid = _active_patterns(enabled_patterns, custom_patterns)
+    out, kinds_hit = _redact_str(out, active, replacement)
+    for kind in kinds_hit:
+        pattern_counts[kind] = pattern_counts.get(kind, 0) + 1
+    cells_redacted += len(kinds_hit)
+
+    summary: dict = {
+        "cells_redacted": cells_redacted,
+        "patterns_matched": pattern_counts,
+    }
+    if invalid:
+        summary["invalid_custom_patterns"] = invalid
+    return out, summary
+
+
 def redaction_meta(
     *,
     applied: bool,

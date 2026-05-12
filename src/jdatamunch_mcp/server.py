@@ -30,6 +30,7 @@ from .tools.delete_dataset import delete_dataset
 from .tools.embed_dataset import embed_dataset
 from .tools.list_repos import list_repos
 from .tools.validate_index import validate_index
+from .runtime import ingest_sql_log_file
 from .tools.get_dataset_history import get_dataset_history
 from .tools.get_dataset_health import get_dataset_health
 from .tools.suggest_keys import suggest_keys
@@ -857,6 +858,45 @@ async def list_tools() -> list[Tool]:
                 "required": ["sql", "datasets"],
             },
         ),
+        Tool(
+            name="ingest_sql_log",
+            description=(
+                "Ingest a SQL log file (pg_stat_statements CSV or generic JSONL, "
+                ".gz transparently) into the per-dataset runtime tables. Each "
+                "query is parsed for table + column refs, redacted at the "
+                "chokepoint (string + numeric literals + cell-PII registry), "
+                "and rolled up into runtime_query_calls keyed by "
+                "(fingerprint, table, column). Tables in the log that don't "
+                "match any indexed dataset count as unmapped. Foundational "
+                "primitive for find_unused_columns, check_column_drop_safe, "
+                "and data_health_radar (v1.6.0 sibling-parity Phase 1)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to a CSV / JSONL / .gz log file.",
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": "pg_stat_statements | jsonl | auto (default — sniff by extension).",
+                        "default": "auto",
+                    },
+                    "redact": {
+                        "type": "boolean",
+                        "description": "Scrub PII / literals before persisting. Default true.",
+                        "default": True,
+                    },
+                    "max_rows": {
+                        "type": "integer",
+                        "description": "Hard cap on ingested rows. Default 100000.",
+                        "default": 100000,
+                    },
+                },
+                "required": ["file_path"],
+            },
+        ),
     ]
 
 
@@ -1097,6 +1137,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 redact=arguments.get("redact", True),
                 redact_patterns=arguments.get("redact_patterns"),
                 redact_skip_columns=arguments.get("redact_skip_columns"),
+                storage_path=storage_path,
+            )
+        elif name == "ingest_sql_log":
+            result = await asyncio.to_thread(
+                ingest_sql_log_file,
+                file_path=arguments["file_path"],
+                source=arguments.get("source", "auto"),
+                redact=arguments.get("redact", True),
+                max_rows=arguments.get("max_rows", 100000),
                 storage_path=storage_path,
             )
         else:

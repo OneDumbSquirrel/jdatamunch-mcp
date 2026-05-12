@@ -1,5 +1,71 @@
 # Changelog
 
+## [1.6.0] — 2026-05-12 — Runtime SQL-log ingest (Phase-1 sibling-parity foundation)
+
+First Phase-1 deliverable from the sibling-parity PRD. Adds the
+foundational runtime-traffic primitive that downstream tools
+(`find_unused_columns`, `check_column_drop_safe`, `data_health_radar`)
+will read from. Inspired by jcodemunch-mcp's `runtime/` pipeline but
+written fresh against jData's per-dataset SQLite shape.
+
+### New: `ingest_sql_log` MCP tool
+
+Ingests a SQL log file (pg_stat_statements CSV or generic JSON-Lines,
+`.gz` transparent) into the per-dataset runtime tables. Each query is:
+
+1. **Parsed** — table + column refs extracted via regex over SELECT /
+   WHERE / ON / GROUP BY / ORDER BY / HAVING clauses. Schema-qualified
+   names and quoted identifiers (double-quote, backtick, bracket) all
+   normalise to the trailing identifier.
+2. **Redacted** at the chokepoint — string literals → `'?'`, numeric
+   literals → `?`, plus the cell-PII registry on any residual text.
+   `redact=False` opt-out for synthetic data only.
+3. **Resolved** — for each (table, column) tuple, find the indexed
+   dataset whose name matches the table (case-insensitive, exact). Over-
+   emitted column tokens that aren't in the dataset's schema drop out.
+4. **Upserted** — `ON CONFLICT(query_fingerprint, table_ref,
+   column_ref, source)` accumulates `calls` and `total_time_ms` and
+   refreshes `last_seen`. Per-pattern redaction counts persist to
+   `runtime_redaction_log` so operators can verify the chokepoint
+   actually fires on production traffic.
+
+Unmapped queries (tables that don't match any indexed dataset) count
+toward the response's `unmapped_queries` but aren't persisted.
+
+### New: `redact_sql_query_text` and `redact_trace_message` public helpers
+
+Trace-level extensions of the cell-PII redaction module shipped in
+v1.5.0:
+
+- `redact_sql_query_text(query, ...)` — strips string + numeric literals
+  (so query fingerprints survive but values don't), then applies the
+  cell registry. `credit_card` is off by default for SQL text — Luhn-
+  valid 13–19 digit sequences inside arbitrary tokens are nearly always
+  false positives once literals are scrubbed.
+- `redact_trace_message(text, ...)` — IPv4 sweep plus the cell registry,
+  for free-form trace / log message bodies.
+
+### Schema migration
+
+`INDEX_VERSION` bumped 2 → 3. The migration is **additive only** — no
+profile recompute, no forced reindex. Legacy v2 indexes gain empty
+runtime tables on first `ingest_sql_log` call.
+
+### What's NOT in this release
+
+The dependent tools (`find_unused_columns`, `check_column_drop_safe`,
+`get_schema_impact`) ship in the **next** Phase-1 batch — they need
+`ingest_sql_log` to bake first.
+
+### Stats
+
+- Tool count: 27 → 28
+- Tests: 351 → 392 (+41 new across redact + parser + ingest)
+- New module: `jdatamunch_mcp/runtime/` (sql_log, ingest, tables)
+
+Inspired by `import_runtime_signal` in jcodemunch-mcp (see
+`C:/MCPs/PRD_sibling_parity_v1.md` §5.1).
+
 ## [1.5.0] — Cell-level redaction on the output side
 
 Tabular tools now scrub PII and credentials from cells before returning

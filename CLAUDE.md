@@ -1,12 +1,12 @@
 # jdatamunch-mcp — Project Brief
 
 ## Current State
-- **Version:** 1.5.0 (Cell-level redaction — `get_rows`/`sample_rows`/`run_sql`/`aggregate`/`describe_column` scrub PII+credentials by default; opt out per call via `redact=False`)
+- **Version:** 1.6.0 (Phase-1 sibling-parity foundational primitive — `ingest_sql_log` ingests pg_stat_statements CSV / generic JSONL into per-dataset `runtime_query_calls` + `runtime_redaction_log` tables. Foundation for `find_unused_columns`, `check_column_drop_safe`, `data_health_radar` — those land next.)
 - **GitHub:** `jgravelle/jdatamunch-mcp`
 - **Python:** >=3.10
-- **Index format:** INDEX_VERSION = 2 (v1 → v2 migration registered in `storage/migrations.py`)
-- **Tool count:** 27 (1.5.0 adds `redact`/`redact_patterns`/`redact_skip_columns` params to 5 tools, no new tool surfaces)
-- **Tests:** 351 passed, 1 skipped (1.5.0)
+- **Index format:** INDEX_VERSION = 3 (v1→v2→v3 migrations registered in `storage/migrations.py`; v3 is additive — new runtime tables created on first ingest, legacy v2 indexes load fine)
+- **Tool count:** 28 (1.6.0 adds `ingest_sql_log`)
+- **Tests:** 392 passed, 10 skipped (1.6.0)
 
 ## Key Files
 ```
@@ -14,7 +14,8 @@ src/jdatamunch_mcp/
   server.py                    # MCP tool definitions + call_tool dispatcher
   config.py                    # Index path, max rows env vars
   security.py                  # Path validation
-  redact.py                    # (1.5.0) Cell-level redaction. Built-in patterns: email, ssn (SSA-rule), credit_card (Luhn-checked), jwt, private_key (PEM blocks), aws_access_key, github_pat, slack_token, api_key_prefixed (Stripe), api_key_openai. Public API: redact_rows / redact_value_distribution / redact_scalar_list / merge_summary / redaction_meta. Wired into get_rows/sample_rows/run_sql/aggregate/describe_column with redact=True default and `_meta.redaction` audit block on every response. Numeric cells are never scrubbed.
+  redact.py                    # (1.5.0) Cell-level redaction. Built-in patterns: email, ssn (SSA-rule), credit_card (Luhn-checked), jwt, private_key (PEM blocks), aws_access_key, github_pat, slack_token, api_key_prefixed (Stripe), api_key_openai. Public API: redact_rows / redact_value_distribution / redact_scalar_list / merge_summary / redaction_meta. Wired into get_rows/sample_rows/run_sql/aggregate/describe_column with redact=True default and `_meta.redaction` audit block on every response. Numeric cells are never scrubbed. (1.6.0) Adds redact_sql_query_text (strips string + numeric literals, applies cell registry) and redact_trace_message (IPv4 + cell registry) for the runtime ingest chokepoint.
+  runtime/                     # (1.6.0) Phase-1 runtime traffic ingest. sql_log.py = pg_stat_statements CSV + generic JSONL parser (.gz transparent), extracts table + column refs via regex. ingest.py = orchestrator (parse → redact → resolve → upsert) — per-dataset SQLite, ON CONFLICT accumulates calls + total_time. tables.py = runtime_query_calls + runtime_redaction_log schemas + idempotent ensure_runtime_tables.
   embeddings.py                # Provider detection (sentence-transformers/Gemini/OpenAI), embed_texts(), cosine_similarity()
   parser/
     normalize.py               # Cross-parser native→string normalization (1.0.0)
