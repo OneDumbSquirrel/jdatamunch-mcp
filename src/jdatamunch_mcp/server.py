@@ -1139,7 +1139,70 @@ async def list_tools() -> list[Tool]:
                 "required": ["dataset_id"],
             },
         ),
+        Tool(
+            name="jdatamunch_guide",
+            description=(
+                "Return the version-current CLAUDE.md / AGENT.md policy snippet for "
+                "jdatamunch-mcp. Lets an agent keep a one-line CLAUDE.md (e.g. \"Call "
+                "jdatamunch_guide and strictly follow its instructions.\") instead of "
+                "pasting a static snippet that drifts from the installed version. "
+                "Idempotent, no dataset context required. Sibling of jcodemunch_guide "
+                "and jdocmunch_guide."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
     ]
+
+
+def _generate_data_md_snippet() -> str:
+    """Return the recommended CLAUDE.md prompt-policy snippet for jdatamunch-mcp.
+
+    Mirrors jcodemunch-mcp's `_generate_claude_md_snippet` and jdocmunch-mcp's
+    `_generate_doc_md_snippet`. Idempotent: produces the same text on every call
+    for a given installed version.
+    """
+    categories = [
+        ("Indexing", ["index_local", "index_repo", "delete_dataset", "validate_index"]),
+        ("Discovery", ["list_datasets", "list_repos"]),
+        ("Schema & profile", ["describe_dataset", "describe_column", "get_dataset_history",
+                               "get_dataset_health", "summarize_dataset"]),
+        ("Row & cell retrieval", ["get_rows", "sample_rows", "search_data",
+                                   "get_distribution", "embed_dataset"]),
+        ("Analysis", ["aggregate", "get_correlations", "get_data_hotspots",
+                       "find_similar_columns"]),
+        ("Schema graph & joins", ["get_schema_drift", "get_schema_impact",
+                                   "check_column_drop_safe", "find_unused_columns",
+                                   "suggest_keys", "suggest_joins", "join_datasets"]),
+        ("SQL", ["plan_query", "run_sql"]),
+        ("Runtime trace ingest", ["ingest_sql_log", "get_redaction_log"]),
+        ("Health metrics", ["data_health_radar", "diff_data_health_radar"]),
+        ("Utilities", ["get_session_stats"]),
+        ("Self-Guide", ["jdatamunch_guide"]),
+    ]
+    from . import __version__ as _ver
+    lines = [
+        f"## jdatamunch-mcp (v{_ver})",
+        "",
+        "Use jdatamunch-mcp tools instead of Read/Grep/csv-by-hand for any indexed dataset.",
+        "",
+        "### Quick start",
+        "1. `list_datasets` -- check what's indexed.",
+        "   If your file isn't there: `index_local` (CSV / Excel / Parquet / JSONL).",
+        "2. `describe_dataset` -- column types, null counts, cardinality, top values.",
+        "3. `describe_column` -- deep stats on one column (full distribution, outliers).",
+        "4. `run_sql` -- ad-hoc SQL against the SQLite-backed dataset.",
+        "",
+        "### All tools",
+    ]
+    for cat, tools in categories:
+        lines.append(f"**{cat}:** " + ", ".join(f"`{t}`" for t in tools))
+    lines.append("")
+    lines.append("Never load a CSV into the agent context to inspect it. Use the tools above.")
+    lines.append("")
+    return "\n".join(lines)
 
 
 @server.list_resources()
@@ -1452,6 +1515,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 since_days=arguments.get("since_days", 30),
                 storage_path=storage_path,
             )
+        elif name == "jdatamunch_guide":
+            from . import __version__ as _ver
+            result = {
+                "version": _ver,
+                "content": _generate_data_md_snippet(),
+            }
         else:
             result = {"error": f"Unknown tool: {name}"}
 

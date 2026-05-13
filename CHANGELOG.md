@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.12.2] - 2026-05-13 - `jdatamunch_guide` sibling-parity tool
+
+Adds `jdatamunch_guide`, the data-MCP sibling of `jcodemunch_guide` (in
+jcm since v1.84.0) and `jdocmunch_guide` (in jdoc v1.63.3). Returns the
+version-current CLAUDE.md / AGENT.md policy snippet for jdatamunch-mcp
+so an agent can keep a one-line CLAUDE.md (`"Call jdatamunch_guide and
+strictly follow its instructions."`) instead of pasting a static block
+that drifts from the installed version.
+
+Backstory: GitHub issue #296 (Codex Desktop compatibility report on
+jcodemunch-mcp) flagged the parity gap in the doc-MCP. Once jdoc shipped
+its guide, jdata was the only suite member still missing one. Tool surface
+is grouped into 11 categories with a quick-start path (list_datasets ->
+index_local -> describe_dataset -> describe_column -> run_sql).
+
+Tool count 35 -> 36. No tool, schema, or wire-format change for existing
+tools. 465 tests pass, 1 skipped (459 baseline + 6 new in `test_v1_12_2.py`).
+
 ## [1.12.1] - 2026-05-12 - drift-proof __version__ via importlib.metadata
 
 `src/jdatamunch_mcp/__init__.py` now derives `__version__` from
