@@ -51,9 +51,85 @@ from .call_tracker import record_call
 server = Server("jdatamunch-mcp")
 
 
+# --------------------------------------------------------------------------- #
+# Tool profiles: tiered sets for controlling context budget.                  #
+# Mirrors jcodemunch-mcp / jdocmunch-mcp (issue #297).                        #
+# Config via JDATAMUNCH_TOOL_PROFILE ("core" | "standard" | "full"; default   #
+# "full"). Config via JDATAMUNCH_DISABLED_TOOLS (comma-separated tool names). #
+# --------------------------------------------------------------------------- #
+_TOOL_TIER_CORE: frozenset[str] = frozenset({
+    # Indexing & discovery
+    "index_local", "index_repo",
+    "list_datasets", "list_repos",
+    # Schema introspection
+    "describe_dataset", "describe_column",
+    # Row retrieval
+    "search_data", "get_rows", "sample_rows",
+    # Aggregation
+    "aggregate",
+})
+
+_TOOL_TIER_STANDARD: frozenset[str] = _TOOL_TIER_CORE | frozenset({
+    # Schema analysis
+    "get_schema_drift", "get_schema_impact",
+    "find_similar_columns", "find_unused_columns",
+    "check_column_drop_safe",
+    # Health & metrics
+    "get_data_hotspots", "get_dataset_health",
+    "data_health_radar", "diff_data_health_radar",
+    "get_dataset_history", "get_correlations", "get_distribution",
+    # Cross-dataset
+    "join_datasets", "suggest_joins", "suggest_keys",
+    # SQL
+    "plan_query", "run_sql",
+    # Utilities
+    "validate_index", "delete_dataset",
+    "summarize_dataset", "embed_dataset",
+})
+
+_PROFILE_TIERS: dict[str, frozenset[str] | None] = {
+    "core": _TOOL_TIER_CORE,
+    "standard": _TOOL_TIER_STANDARD,
+    "full": None,
+}
+
+_ALWAYS_PRESENT_TOOLS: frozenset[str] = frozenset({"jdatamunch_guide"})
+_UNDISABLEABLE_TOOLS: frozenset[str] = frozenset()
+
+
+def _get_tool_profile() -> str:
+    raw = os.environ.get("JDATAMUNCH_TOOL_PROFILE", "full").strip().lower()
+    return raw if raw in _PROFILE_TIERS else "full"
+
+
+def _get_disabled_tools() -> frozenset[str]:
+    raw = os.environ.get("JDATAMUNCH_DISABLED_TOOLS", "").strip()
+    if not raw:
+        return frozenset()
+    return frozenset(t.strip() for t in raw.split(",") if t.strip())
+
+
+def _filter_tools(tools: list[Tool]) -> list[Tool]:
+    profile = _get_tool_profile()
+    allowed = _PROFILE_TIERS.get(profile)
+    if allowed is not None:
+        tools = [t for t in tools if t.name in allowed or t.name in _ALWAYS_PRESENT_TOOLS]
+    disabled = _get_disabled_tools()
+    if disabled:
+        effective_disabled = disabled - _UNDISABLEABLE_TOOLS
+        if effective_disabled:
+            tools = [t for t in tools if t.name not in effective_disabled]
+    return tools
+
+
 @server.list_tools()
 async def list_tools() -> list[Tool]:
     """List all available tools."""
+    return _filter_tools(_all_tools())
+
+
+def _all_tools() -> list[Tool]:
+    """Return the unfiltered list of every tool exposed by this server."""
     return [
         Tool(
             name="index_local",
@@ -1221,6 +1297,16 @@ async def list_prompts() -> list:
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Dispatch tool calls to implementations."""
     storage_path = os.environ.get("DATA_INDEX_PATH")
+
+    # Honor JDATAMUNCH_DISABLED_TOOLS at call time. (#297)
+    _disabled_at_call = _get_disabled_tools() - _UNDISABLEABLE_TOOLS
+    if name in _disabled_at_call:
+        return [TextContent(type="text", text=json.dumps({
+            "error": (
+                f"Tool '{name}' is disabled via JDATAMUNCH_DISABLED_TOOLS. "
+                f"Remove it from the env var to re-enable."
+            )
+        }, indent=2))]
 
     try:
         # Anti-loop detection for row-retrieval tools

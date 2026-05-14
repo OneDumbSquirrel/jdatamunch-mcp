@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.13.0] - 2026-05-14 - `tool_profile` + `disabled_tools` config (#297)
+
+Reported by @AlexJ-StL in jcm#297: Google Antigravity caps MCP-server
+tool counts at 50, and the full munch suite ships 81 + 60 + 35 = 176
+tools. Sibling-parity gap with jcm. jdata now ships the same knobs
+that jdoc gained in v1.64.0:
+
+- `JDATAMUNCH_TOOL_PROFILE=core|standard|full` (default `full`).
+  - `core` (10 tools): index + describe + the row-retrieval essentials.
+  - `standard` (~30 tools): core + analysis tools.
+  - `full` (35 tools): everything, current behavior.
+- `JDATAMUNCH_DISABLED_TOOLS=tool1,tool2,...` removes named tools from
+  both the listed schema and the call dispatcher.
+
+Filtering enforced in `list_tools()` AND `call_tool()` so cached
+schemas get a clear error. `jdatamunch_guide` survives tier filtering
+but honors `disabled_tools` (documentation, not a control surface).
+
+Antigravity users running all three munches can now do:
+
+```jsonc
+"jdatamunch": { "env": { "JDATAMUNCH_TOOL_PROFILE": "core" } }
+"jdocmunch":  { "env": { "JDOCMUNCH_TOOL_PROFILE":  "core" } }
+"jcodemunch": { "env": { "JCM_TOOL_PROFILE":        "core" } }  // or tool_profile in .jcodemunch.jsonc
+```
+
+Suite total drops to 10 + 13 + 17 = 40 tools, comfortably under 50.
+
 ## [1.12.2] - 2026-05-13 - `jdatamunch_guide` sibling-parity tool
 
 Adds `jdatamunch_guide`, the data-MCP sibling of `jcodemunch_guide` (in
