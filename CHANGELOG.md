@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.13.1] - 2026-06-10 - disclose the community savings meter in README
+
+Docs-only patch. The anonymous community savings meter (random install ID +
+tokens-saved counter POSTed to j.gravelle.us, default on, opt out with
+`JDATAMUNCH_SHARE_SAVINGS=0`) was implemented and opt-out-able but never
+described in the README. Added a "Community savings meter" disclosure to the
+Token savings telemetry section, mirroring jdocmunch-mcp's README. Prompted by
+PyPI's quarantine-exit guidance on the sibling package: long-term or
+out-of-band operations must be disclosed in the README. No code change.
+
 ## [1.13.0] - 2026-05-14 - `tool_profile` + `disabled_tools` config (#297)
 
 Reported by @AlexJ-StL in jcm#297: Google Antigravity caps MCP-server

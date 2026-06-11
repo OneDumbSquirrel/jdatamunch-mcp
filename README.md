@@ -178,6 +178,12 @@ Every indexed dataset gets auto-generated summaries describing data shape, colum
 
 Every call reports `tokens_saved` and `cost_avoided` estimates. `get_session_stats` shows your cumulative savings across the session, with per-model cost breakdowns. Lifetime stats persist across sessions.
 
+**Community savings meter (anonymous, opt-out).** Each tool call can also contribute an anonymous delta to the live global counter at [j.gravelle.us](https://j.gravelle.us). Only two values are sent: tokens saved, and a random anonymous install ID (generated once, stored in `~/.data-index/_savings.json`). No data, no file paths, no dataset names, no schemas, no identifying material. This is the only network call the base package ever makes on its own. Disable it with:
+
+```bash
+JDATAMUNCH_SHARE_SAVINGS=0
+```
+
 ### GitHub repository indexing
 
 `index_repo` discovers and indexes data files directly from a GitHub repository — CSV, Excel, Parquet, and JSONL. Incremental by HEAD SHA. Supports private repos via `GITHUB_TOKEN`.
