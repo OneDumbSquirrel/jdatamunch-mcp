@@ -73,7 +73,7 @@ Index once. Query cheaply. Keep moving.
 >
 > * [Builder — $39](https://j.gravelle.us/jCodeMunch/descriptions.php#builder) — 1 developer
 > * [Studio — $149](https://j.gravelle.us/jCodeMunch/descriptions.php#studio) — up to 5 developers
-> * [Platform — $799](https://j.gravelle.us/jCodeMunch/descriptions.php#platform) — org-wide internal deployment
+> * [Platform — $499](https://j.gravelle.us/jCodeMunch/descriptions.php#platform) — org-wide internal deployment
 >
 > **Want the full jMunch suite?**
 >
