@@ -1,13 +1,14 @@
 # jdatamunch-mcp — Project Brief
 
 ## Current State
+- **Version:** 1.14.0 (`tune_weights`: the `search_data` ranking weight vector (name/value/type match weights plus the BM25 and semantic blend scales), previously hardcoded module constants, is now tunable and persistable per-dataset and honored at query time. Inspect / set / reset; overrides validated + clamped and stored in `<index_path>/ranking_tuning.json` (per-dataset wins over global wins over defaults). Closes the sibling-parity gap, since jcm and jdoc both ship `tune_weights`. Honest divergence: jData keeps no ranking-events ledger (`call_tracker` is ephemeral loop-detection), so tuning is explicit, not learned. New `tuning.py` owns the weight defaults (`DEFAULT_WEIGHTS`) + persistence; `search_data` resolves weights via `load_effective_weights` and honors a tuned `default_semantic_weight` when the caller omits `semantic_weight`. Tool count 35 -> 36. Tests `tests/test_v1_14_0.py` (14). Backstory: 2026-06-16 jData audit. v1.13.0/1.13.1 were docs-only, savings-meter disclosure + pricing sync.)
 - **Version:** 1.12.2 (Adds `jdatamunch_guide` sibling-parity tool. Returns the version-current CLAUDE.md / AGENT.md policy snippet for jdatamunch-mcp so an agent can keep a one-line CLAUDE.md `"Call jdatamunch_guide and strictly follow its instructions."` instead of pasting a static block that drifts. Mirrors jcm's `jcodemunch_guide` and jdoc's `jdocmunch_guide`. Tool count 35 -> 36. Backstory: issue #296 on jcm.)
 - **Version (v1.12.1):** Hygiene patch. `__version__` now derived from `importlib.metadata.version("jdatamunch-mcp")` in `__init__.py` — pyproject.toml is the single source of truth, the runtime/packaging version strings can no longer disagree. Mirrors jcm's pattern. Backstory: v1.12.0 shipped with the hardcoded literal stuck at 1.9.0, three minors stale.
 - **Version (v1.12.0):** Phase-2 jData COMPLETE — `find_similar_columns`: multi-signal cross-dataset column consolidation. Fuses name (token Jaccard, snake+camel aware) + type + top-value Jaccard + cardinality + embedding cosine (when present). Union-find clustering; verdict tiers: near_duplicate / naming_drift / parallel_definition / overlapping_topic. Differs_by breakdown per pair makes verdict auditable. Mirrors jcm's find_similar_symbols.
 - **GitHub:** `jgravelle/jdatamunch-mcp`
 - **Python:** >=3.10
 - **Index format:** INDEX_VERSION = 3 (v1→v2→v3 migrations registered in `storage/migrations.py`; v3 is additive — new runtime tables created on first ingest, legacy v2 indexes load fine)
-- **Tool count:** 35 (1.6.0 added `ingest_sql_log`; 1.7.0 added `find_unused_columns`; 1.8.0 added `check_column_drop_safe`; 1.9.0 added `get_schema_impact`; 1.10.0 added `get_redaction_log` + `get_data_hotspots` v2; 1.11.0 added `data_health_radar` + `diff_data_health_radar`; 1.12.0 adds `find_similar_columns`)
+- **Tool count:** 36 (1.6.0 added `ingest_sql_log`; 1.7.0 added `find_unused_columns`; 1.8.0 added `check_column_drop_safe`; 1.9.0 added `get_schema_impact`; 1.10.0 added `get_redaction_log` + `get_data_hotspots` v2; 1.11.0 added `data_health_radar` + `diff_data_health_radar`; 1.12.0 adds `find_similar_columns`; 1.14.0 adds `tune_weights`)
 - **Tests:** 470 passed, 10 skipped (1.12.0)
 
 ## Key Files
@@ -15,6 +16,7 @@
 src/jdatamunch_mcp/
   server.py                    # MCP tool definitions + call_tool dispatcher
   config.py                    # Index path, max rows env vars
+  tuning.py                    # (1.14.0) Ranking-weight overrides for search_data. DEFAULT_WEIGHTS (single source of truth for the weight vector) + load_effective_weights() (defaults < global < per-dataset); persisted in <index_path>/ranking_tuning.json. The tune_weights tool's backing store.
   security.py                  # Path validation
   redact.py                    # (1.5.0) Cell-level redaction. Built-in patterns: email, ssn (SSA-rule), credit_card (Luhn-checked), jwt, private_key (PEM blocks), aws_access_key, github_pat, slack_token, api_key_prefixed (Stripe), api_key_openai. Public API: redact_rows / redact_value_distribution / redact_scalar_list / merge_summary / redaction_meta. Wired into get_rows/sample_rows/run_sql/aggregate/describe_column with redact=True default and `_meta.redaction` audit block on every response. Numeric cells are never scrubbed. (1.6.0) Adds redact_sql_query_text (strips string + numeric literals, applies cell registry) and redact_trace_message (IPv4 + cell registry) for the runtime ingest chokepoint.
   runtime/                     # (1.6.0) Phase-1 runtime traffic ingest. sql_log.py = pg_stat_statements CSV + generic JSONL parser (.gz transparent), extracts table + column refs via regex. ingest.py = orchestrator (parse → redact → resolve → upsert) — per-dataset SQLite, ON CONFLICT accumulates calls + total_time. tables.py = runtime_query_calls + runtime_redaction_log schemas + idempotent ensure_runtime_tables.
@@ -39,7 +41,8 @@ src/jdatamunch_mcp/
     describe_column.py         # Deep stats for one column
     sample_rows.py             # Sample rows (optionally filtered)
     get_rows.py                # Rows by index range or filter
-    search_data.py             # Search rows by column value / pattern
+    search_data.py             # Search rows by column value / pattern. Ranking weights resolved per-query via tuning.load_effective_weights (tunable by tune_weights).
+    tune_weights.py            # (1.14.0) Inspect / set / reset the search_data ranking weights. No ledger, so tuning is explicit (vs jcm/jdoc's learned). Mirrors their tune_weights agent-facing contract.
     aggregate.py               # Aggregate (count/sum/mean/min/max) with optional groupby
     get_session_stats.py       # Session token savings stats
     get_schema_drift.py        # get_schema_drift: compare schema between two datasets (added/removed/type/nullability)

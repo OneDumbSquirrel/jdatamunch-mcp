@@ -8,23 +8,19 @@ from ..bm25 import BM25, tokenize
 from ..config import get_index_path, HARD_CAP_SEARCH_MAX_RESULTS
 from ..storage.data_store import DataStore
 from ..storage.token_tracker import get_total_saved
+from ..tuning import load_effective_weights
 
 logger = logging.getLogger(__name__)
 
-# Scoring weights (per PRD)
-_W_NAME_EXACT = 20
-_W_NAME_SUBSTR = 10
-_W_NAME_WORD = 5
-_W_AI_SUMMARY_WORD = 3
-_W_VALUE_EXACT = 8
-_W_VALUE_SUBSTR = 4
-_W_TYPE_BOOST = 2
+# Ranking weights live in ..tuning (DEFAULT_WEIGHTS) and are resolved per
+# dataset at query time via load_effective_weights(), so tune_weights can
+# re-tune them without touching this module.
 
 _DATE_KEYWORDS = frozenset(["date", "time", "year", "month", "day", "datetime", "timestamp"])
 _NUM_KEYWORDS = frozenset(["count", "amount", "number", "num", "total", "age", "id", "code"])
 
 
-def _score_column(col: dict, query_lower: str, query_words: set) -> tuple:
+def _score_column(col: dict, query_lower: str, query_words: set, w: dict) -> tuple:
     """Score a column against a query. Returns (score, match_details)."""
     score = 0
     matched_values: list = []
@@ -34,21 +30,21 @@ def _score_column(col: dict, query_lower: str, query_words: set) -> tuple:
 
     # Column name scoring
     if query_lower == name_lower:
-        score += _W_NAME_EXACT
+        score += w["name_exact"]
     elif query_lower in name_lower:
-        score += _W_NAME_SUBSTR
+        score += w["name_substr"]
     else:
         name_words = set(name_lower.replace("_", " ").replace("-", " ").split())
         word_hits = len(query_words & name_words)
         if word_hits:
-            score += word_hits * _W_NAME_WORD
+            score += word_hits * w["name_word"]
 
     # AI summary scoring (when available)
     if col.get("ai_summary"):
         summary_lower = col["ai_summary"].lower()
         for word in query_words:
             if word in summary_lower:
-                score += _W_AI_SUMMARY_WORD
+                score += w["ai_summary_word"]
 
     # Value index: exact match
     value_source: list = []
@@ -62,7 +58,7 @@ def _score_column(col: dict, query_lower: str, query_words: set) -> tuple:
         hit = False
         for word in query_words:
             if word == v_lower:
-                score += _W_VALUE_EXACT
+                score += w["value_exact"]
                 if str(v) not in matched_values:
                     matched_values.append(str(v))
                 match_type = "value"
@@ -71,7 +67,7 @@ def _score_column(col: dict, query_lower: str, query_words: set) -> tuple:
         if not hit:
             for word in query_words:
                 if len(word) >= 3 and word in v_lower:
-                    score += _W_VALUE_SUBSTR
+                    score += w["value_substr"]
                     if str(v) not in matched_values:
                         matched_values.append(str(v))
                     match_type = "value"
@@ -79,9 +75,9 @@ def _score_column(col: dict, query_lower: str, query_words: set) -> tuple:
 
     # Type-aware boost
     if col["type"] == "datetime" and query_words & _DATE_KEYWORDS:
-        score += _W_TYPE_BOOST
+        score += w["type_boost"]
     elif col["type"] in ("integer", "float") and query_words & _NUM_KEYWORDS:
-        score += _W_TYPE_BOOST
+        score += w["type_boost"]
 
     return score, matched_values, match_type
 
@@ -182,7 +178,7 @@ def search_data(
     search_scope: str = "all",
     max_results: int = 10,
     semantic: bool = False,
-    semantic_weight: float = 0.5,
+    semantic_weight: Optional[float] = None,
     semantic_only: bool = False,
     storage_path: Optional[str] = None,
 ) -> dict:
@@ -197,12 +193,16 @@ def search_data(
     """
     t0 = time.time()
     max_results = min(max(1, max_results), HARD_CAP_SEARCH_MAX_RESULTS)
-    semantic_weight = max(0.0, min(1.0, semantic_weight))
     store = DataStore(base_path=storage_path or str(get_index_path()))
 
     idx = store.load(dataset)
     if idx is None:
         return {"error": f"NOT_INDEXED: dataset {dataset!r} is not indexed."}
+
+    w = load_effective_weights(dataset, storage_path)
+    if semantic_weight is None:
+        semantic_weight = w["default_semantic_weight"]
+    semantic_weight = max(0.0, min(1.0, semantic_weight))
 
     # Semantic scoring (if requested)
     sem_scores: dict[str, float] = {}
@@ -236,12 +236,12 @@ def search_data(
             if search_scope == "schema":
                 name_lower = col["name"].lower()
                 if query_lower == name_lower:
-                    bm25_score = _W_NAME_EXACT
+                    bm25_score = w["name_exact"]
                 elif query_lower in name_lower:
-                    bm25_score = _W_NAME_SUBSTR
+                    bm25_score = w["name_substr"]
                 else:
                     name_words = set(name_lower.replace("_", " ").split())
-                    bm25_score = len(query_words & name_words) * _W_NAME_WORD
+                    bm25_score = len(query_words & name_words) * w["name_word"]
                 if bm25_score > 0:
                     mt = "schema"
             elif search_scope == "values":
@@ -254,11 +254,11 @@ def search_data(
                     v_lower = str(v).lower()
                     for word in query_words:
                         if word == v_lower:
-                            bm25_score += _W_VALUE_EXACT
+                            bm25_score += w["value_exact"]
                             mv.append(str(v))
                             break
                         elif len(word) >= 3 and word in v_lower:
-                            bm25_score += _W_VALUE_SUBSTR
+                            bm25_score += w["value_substr"]
                             mv.append(str(v))
                             break
                 if bm25_score > 0:
@@ -267,10 +267,10 @@ def search_data(
                 # 'all' scope: BM25 ranking over name + summary + values (B9),
                 # combined with the legacy weighted score for value-match
                 # provenance + type-aware boosts.
-                legacy_score, mv, mt = _score_column(col, query_lower, query_words)
+                legacy_score, mv, mt = _score_column(col, query_lower, query_words, w)
                 bm25_raw = bm25_index.score(query_terms, col_idx) if bm25_index else 0.0
                 # Scale BM25 into the legacy score range so blending stays sane.
-                bm25_score = legacy_score + bm25_raw * 5.0
+                bm25_score = legacy_score + bm25_raw * w["bm25_scale"]
                 if bm25_raw > 0 and legacy_score == 0:
                     mt = "schema"
 
@@ -283,7 +283,7 @@ def search_data(
                 mt = "semantic"
         elif sem_scores:
             # Normalize BM25 score to [0, 1] range for blending
-            combined = (1 - semantic_weight) * bm25_score + semantic_weight * (sem * 20)
+            combined = (1 - semantic_weight) * bm25_score + semantic_weight * (sem * w["semantic_scale"])
             if bm25_score == 0 and sem > 0.3:
                 mt = "semantic"
         else:

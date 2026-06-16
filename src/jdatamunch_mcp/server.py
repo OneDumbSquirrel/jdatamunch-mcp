@@ -45,6 +45,7 @@ from .tools.suggest_joins import suggest_joins
 from .tools.get_distribution import get_distribution
 from .tools.plan_query import plan_query
 from .tools.run_sql import run_sql
+from .tools.tune_weights import tune_weights
 from .budget import enforce_budget
 from .call_tracker import record_call
 
@@ -82,6 +83,8 @@ _TOOL_TIER_STANDARD: frozenset[str] = _TOOL_TIER_CORE | frozenset({
     "join_datasets", "suggest_joins", "suggest_keys",
     # SQL
     "plan_query", "run_sql",
+    # Ranking
+    "tune_weights",
     # Utilities
     "validate_index", "delete_dataset",
     "summarize_dataset", "embed_dataset",
@@ -1216,6 +1219,45 @@ def _all_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="tune_weights",
+            description=(
+                "Inspect, set, or reset the weight vector search_data uses to rank "
+                "columns (name/value/type match weights plus the BM25 and semantic "
+                "blend scales). Omit all args to inspect the effective weights and "
+                "their source. Pass set_weights (a {weight: number} object) to "
+                "override, or reset=true to clear. Scope with dataset (per-dataset "
+                "overrides win over the global default, which wins over built-ins). "
+                "Honored by search_data at query time. Unlike jcodemunch/jdocmunch, "
+                "weights are tuned explicitly here (no ranking ledger). Tunable: "
+                "name_exact, name_substr, name_word, ai_summary_word, value_exact, "
+                "value_substr, type_boost, bm25_scale, semantic_scale, "
+                "default_semantic_weight."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dataset": {
+                        "type": "string",
+                        "description": "Tune one dataset. Omit for the global default.",
+                    },
+                    "set_weights": {
+                        "type": "object",
+                        "description": (
+                            "Weight overrides, e.g. name_exact=30. Unknown names or "
+                            "non-numeric values are rejected; values are clamped to "
+                            "each weight bounds."
+                        ),
+                        "additionalProperties": {"type": "number"},
+                    },
+                    "reset": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Clear this scope overrides.",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="jdatamunch_guide",
             description=(
                 "Return the version-current CLAUDE.md / AGENT.md policy snippet for "
@@ -1255,7 +1297,7 @@ def _generate_data_md_snippet() -> str:
         ("SQL", ["plan_query", "run_sql"]),
         ("Runtime trace ingest", ["ingest_sql_log", "get_redaction_log"]),
         ("Health metrics", ["data_health_radar", "diff_data_health_radar"]),
-        ("Utilities", ["get_session_stats"]),
+        ("Utilities", ["get_session_stats", "tune_weights"]),
         ("Self-Guide", ["jdatamunch_guide"]),
     ]
     from . import __version__ as _ver
@@ -1370,7 +1412,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 search_scope=arguments.get("search_scope", "all"),
                 max_results=arguments.get("max_results", 10),
                 semantic=arguments.get("semantic", False),
-                semantic_weight=arguments.get("semantic_weight", 0.5),
+                semantic_weight=arguments.get("semantic_weight"),
                 semantic_only=arguments.get("semantic_only", False),
                 storage_path=storage_path,
             )
@@ -1599,6 +1641,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 dataset_id=arguments["dataset_id"],
                 source=arguments.get("source"),
                 since_days=arguments.get("since_days", 30),
+                storage_path=storage_path,
+            )
+        elif name == "tune_weights":
+            result = tune_weights(
+                dataset=arguments.get("dataset"),
+                set_weights=arguments.get("set_weights"),
+                reset=arguments.get("reset", False),
                 storage_path=storage_path,
             )
         elif name == "jdatamunch_guide":
