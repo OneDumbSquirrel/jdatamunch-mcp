@@ -1,0 +1,63 @@
+name: Release
+
+# Auto-tag + GitHub-release on a version bump, but only after the Tests
+# workflow has gone green for the same commit. A no-op when the version in
+# pyproject.toml already has a release (e.g. docs-only pushes), so it is safe
+# to run on every push to master.
+#
+# PyPI publishing stays manual (it uses local credentials, not a CI secret).
+# To automate it later, add a publish job using PyPI Trusted Publishing.
+
+on:
+  workflow_run:
+    workflows: ["Tests"]
+    types: [completed]
+    branches: [master]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Only release a commit whose Tests run actually passed.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Tag + GitHub release on version bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          VER=$(grep -oE '^version = "[0-9]+\.[0-9]+\.[0-9]+"' pyproject.toml \
+                | head -1 | sed -E 's/.*"([0-9.]+)".*/\1/' || true)
+          if [ -z "${VER:-}" ]; then
+            echo "No version found in pyproject.toml; skipping."
+            exit 0
+          fi
+          TAG="v${VER}"
+
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; nothing to do."
+            exit 0
+          fi
+
+          SUBJ=$(git log -1 --format=%s)
+          NOTES=$(git log -1 --format=%B \
+                  | sed -E '/^Co-Authored-By:/d; /Generated with \[Claude Code\]/d; /^[[:space:]]*$/d' \
+                  || true)
+          [ -z "${NOTES:-}" ] && NOTES="$SUBJ"
+
+          gh release create "$TAG" --repo "$REPO" --target "$SHA" \
+            --title "$SUBJ" --notes "$NOTES"
+          echo "Created release $TAG for $SHA"
