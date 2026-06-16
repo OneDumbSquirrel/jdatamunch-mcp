@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.14.0] - 2026-06-16 - `tune_weights`: tunable search_data ranking weights
+
+`search_data` ranks columns with a small weight vector (name / value / type
+match weights plus the BM25 and semantic blend scales). Until now those weights
+were hardcoded module constants and there was no way to adjust them. The new
+`tune_weights` tool makes the vector tunable and persistable, closing a
+sibling-parity gap (jcodemunch-mcp and jdocmunch-mcp both ship a `tune_weights`
+tool over their ranker).
+
+- New `tuning.py` holds `DEFAULT_WEIGHTS` (single source of truth for the
+  vector) and `load_effective_weights()`, which resolves defaults < global
+  overrides < per-dataset overrides. Overrides persist in
+  `<index_path>/ranking_tuning.json` (atomic write; a corrupt file degrades to
+  defaults).
+- New `tune_weights` tool: omit all args to inspect the effective weights and
+  their source; pass `set_weights` (a `{weight: number}` object) to override;
+  pass `reset=true` to clear. Scope with `dataset`. Overrides are validated
+  (unknown names / non-numeric values rejected) and clamped to each weight's
+  bounds.
+- `search_data` resolves the effective weights once per query and now honors a
+  tuned `default_semantic_weight` when the caller omits `semantic_weight`.
+  Default behavior is unchanged when no overrides exist.
+- Honest divergence from the siblings: jdatamunch-mcp keeps no ranking-events
+  ledger (`call_tracker` is ephemeral loop-detection), so weights are tuned
+  explicitly here rather than learned from usage.
+
+Tunable weights: `name_exact`, `name_substr`, `name_word`, `ai_summary_word`,
+`value_exact`, `value_substr`, `type_boost`, `bm25_scale`, `semantic_scale`,
+`default_semantic_weight`. Tool count 35 -> 36. 14 new tests
+(`tests/test_v1_14_0.py`); full suite 498 passed / 10 skipped.
+
 ## [1.13.1] - 2026-06-10 - disclose the community savings meter in README
 
 Docs-only patch. The anonymous community savings meter (random install ID +
