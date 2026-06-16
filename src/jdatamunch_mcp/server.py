@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 import traceback
 from typing import Optional
 
@@ -47,6 +48,8 @@ from .tools.plan_query import plan_query
 from .tools.run_sql import run_sql
 from .tools.tune_weights import tune_weights
 from .tools.check_embedding_drift import check_embedding_drift
+from .tools.analyze_perf import analyze_perf
+from . import perf as _perf
 from .budget import enforce_budget
 from .call_tracker import record_call
 
@@ -88,6 +91,8 @@ _TOOL_TIER_STANDARD: frozenset[str] = _TOOL_TIER_CORE | frozenset({
     "tune_weights",
     # Embeddings
     "check_embedding_drift",
+    # Diagnostics
+    "analyze_perf",
     # Utilities
     "validate_index", "delete_dataset",
     "summarize_dataset", "embed_dataset",
@@ -1290,6 +1295,38 @@ def _all_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="analyze_perf",
+            description=(
+                "Per-tool latency and cache-hit telemetry. Returns p50/p95/max "
+                "latency and error rate per tool, the slowest tools by p95, and "
+                "result-cache hit rates (aggregate / get_correlations / "
+                "get_data_hotspots are the cached tools). window=session reads the "
+                "always-on in-memory ring; window=1h/24h/7d/all reads the persistent "
+                "SQLite sink (requires JDATAMUNCH_PERF_TELEMETRY=1). Sibling of "
+                "jcodemunch / jdocmunch analyze_perf."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "window": {
+                        "type": "string",
+                        "enum": ["session", "1h", "24h", "7d", "all"],
+                        "default": "session",
+                        "description": "session = in-memory ring; others read the persistent perf db.",
+                    },
+                    "top": {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Max slowest-tools / coldest-caches returned.",
+                    },
+                    "tool": {
+                        "type": "string",
+                        "description": "Restrict the analysis to a single tool name.",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="jdatamunch_guide",
             description=(
                 "Return the version-current CLAUDE.md / AGENT.md policy snippet for "
@@ -1329,7 +1366,7 @@ def _generate_data_md_snippet() -> str:
         ("SQL", ["plan_query", "run_sql"]),
         ("Runtime trace ingest", ["ingest_sql_log", "get_redaction_log"]),
         ("Health metrics", ["data_health_radar", "diff_data_health_radar", "check_embedding_drift"]),
-        ("Utilities", ["get_session_stats", "tune_weights"]),
+        ("Utilities", ["get_session_stats", "tune_weights", "analyze_perf"]),
         ("Self-Guide", ["jdatamunch_guide"]),
     ]
     from . import __version__ as _ver
@@ -1383,6 +1420,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         }, indent=2))]
 
     try:
+        t0 = time.perf_counter()
         # Anti-loop detection for row-retrieval tools
         dataset_arg = arguments.get("dataset", "")
         if name in ("get_rows", "sample_rows", "aggregate", "search_data", "describe_dataset"):
@@ -1689,6 +1727,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 threshold=arguments.get("threshold", 0.05),
                 storage_path=storage_path,
             )
+        elif name == "analyze_perf":
+            result = analyze_perf(
+                window=arguments.get("window", "session"),
+                top=arguments.get("top", 20),
+                tool=arguments.get("tool"),
+                storage_path=storage_path,
+            )
         elif name == "jdatamunch_guide":
             from . import __version__ as _ver
             result = {
@@ -1724,9 +1769,23 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 if _meta:
                     result["_meta"] = _meta
 
+        try:
+            _perf.record(
+                name,
+                (time.perf_counter() - t0) * 1000.0,
+                ok=not (isinstance(result, dict) and "error" in result),
+                storage_path=storage_path,
+            )
+        except Exception:
+            pass
+
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     except Exception as e:
+        try:
+            _perf.record(name, (time.perf_counter() - t0) * 1000.0, ok=False, storage_path=storage_path)
+        except Exception:
+            pass
         print(traceback.format_exc(), file=sys.stderr)
         return [TextContent(type="text", text=json.dumps({"error": str(e)}, indent=2))]
 

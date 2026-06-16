@@ -166,7 +166,7 @@ def get_correlations(
         "columns": columns,
         "top_n": top_n,
     })
-    cached = result_cache.get(store.dataset_dir(dataset), cache_key)
+    cached = result_cache.get(store.dataset_dir(dataset), cache_key, tool="get_correlations")
     if cached is not None:
         cached.setdefault("_meta", {})
         cached["_meta"]["cache_hit"] = True

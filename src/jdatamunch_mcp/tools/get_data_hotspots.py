@@ -161,7 +161,7 @@ def get_data_hotspots(
             "traffic_signature": max_calls,
         },
     )
-    cached = result_cache.get(store.dataset_dir(dataset), cache_key)
+    cached = result_cache.get(store.dataset_dir(dataset), cache_key, tool="get_data_hotspots")
     if cached is not None:
         cached.setdefault("_meta", {})
         cached["_meta"]["cache_hit"] = True

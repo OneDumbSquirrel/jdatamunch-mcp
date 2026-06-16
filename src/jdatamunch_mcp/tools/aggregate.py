@@ -72,7 +72,7 @@ def aggregate(
         "approximate": approximate,
     }
     cache_key = result_cache.make_key("aggregate", idx.source_hash, cache_args)
-    cached = result_cache.get(store.dataset_dir(dataset), cache_key)
+    cached = result_cache.get(store.dataset_dir(dataset), cache_key, tool="aggregate")
     if cached is not None:
         cached.setdefault("_meta", {})
         cached["_meta"]["cache_hit"] = True

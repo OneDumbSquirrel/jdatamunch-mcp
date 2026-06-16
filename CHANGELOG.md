@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.16.0] - 2026-06-16 - `analyze_perf`: per-tool latency + cache-hit telemetry
+
+Completes the sibling-parity trio (jcodemunch-mcp and jdocmunch-mcp both ship
+`analyze_perf`). jData previously had no latency telemetry and an uninstrumented
+result cache; this adds both, then surfaces them.
+
+- New `perf.py`: an in-memory per-tool latency ring (always populated when
+  `call_tool` fires; 500 samples/tool) plus an optional persistent SQLite sink
+  at `<index_path>/perf_telemetry.db`, gated by `JDATAMUNCH_PERF_TELEMETRY=1`
+  (FIFO-capped by `JDATAMUNCH_PERF_TELEMETRY_MAX_ROWS`, default 100000).
+  Recording is best-effort and never breaks a tool call.
+- `server.py` records each dispatch's wall-clock latency and ok/error flag.
+- `storage/result_cache.py` gained per-tool hit/miss counters (`cache_stats()`);
+  `get()` takes an optional `tool` so `aggregate` / `get_correlations` /
+  `get_data_hotspots` attribute their cache hits.
+- New `analyze_perf` tool: `window=session` reads the in-memory ring;
+  `window=1h|24h|7d|all` reads the persistent sink. Returns per-tool
+  p50/p95/max/error_rate, the slowest tools by p95, and result-cache hit rates
+  (totals + coldest-by-tool). `tool=` narrows to one tool; `top=` caps the
+  rankings.
+
+Tool count 37 -> 38. **jData now has full agent-facing tool parity with its
+siblings.** 12 new tests (`tests/test_v1_16_0.py`).
+
 ## [1.15.0] - 2026-06-16 - `check_embedding_drift`: detect silent embedding-provider drift
 
 Column embeddings power semantic `search_data` and `find_similar_columns`. If
