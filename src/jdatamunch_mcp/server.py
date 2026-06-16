@@ -46,6 +46,7 @@ from .tools.get_distribution import get_distribution
 from .tools.plan_query import plan_query
 from .tools.run_sql import run_sql
 from .tools.tune_weights import tune_weights
+from .tools.check_embedding_drift import check_embedding_drift
 from .budget import enforce_budget
 from .call_tracker import record_call
 
@@ -85,6 +86,8 @@ _TOOL_TIER_STANDARD: frozenset[str] = _TOOL_TIER_CORE | frozenset({
     "plan_query", "run_sql",
     # Ranking
     "tune_weights",
+    # Embeddings
+    "check_embedding_drift",
     # Utilities
     "validate_index", "delete_dataset",
     "summarize_dataset", "embed_dataset",
@@ -1258,6 +1261,35 @@ def _all_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="check_embedding_drift",
+            description=(
+                "Detect whether the embedding provider has drifted since it was "
+                "pinned. Column embeddings power semantic search_data and "
+                "find_similar_columns; if the provider model changes underneath a "
+                "stored index, saved vectors stop matching the live encoder and "
+                "semantic ranking quietly degrades. Pins a 16-string canary in "
+                "<index_path>/embed_canary.json and recomputes it on demand, "
+                "reporting cosine drift. Call with force=true once to set the "
+                "baseline, then again after a suspected provider change. Sibling of "
+                "jcodemunch / jdocmunch check_embedding_drift."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "force": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Re-embed and re-pin the canary baseline (set once to establish it).",
+                    },
+                    "threshold": {
+                        "type": "number",
+                        "default": 0.05,
+                        "description": "Cosine-distance alarm threshold; alarm is true when the worst canary drifts past it.",
+                    },
+                },
+            },
+        ),
+        Tool(
             name="jdatamunch_guide",
             description=(
                 "Return the version-current CLAUDE.md / AGENT.md policy snippet for "
@@ -1296,7 +1328,7 @@ def _generate_data_md_snippet() -> str:
                                    "suggest_keys", "suggest_joins", "join_datasets"]),
         ("SQL", ["plan_query", "run_sql"]),
         ("Runtime trace ingest", ["ingest_sql_log", "get_redaction_log"]),
-        ("Health metrics", ["data_health_radar", "diff_data_health_radar"]),
+        ("Health metrics", ["data_health_radar", "diff_data_health_radar", "check_embedding_drift"]),
         ("Utilities", ["get_session_stats", "tune_weights"]),
         ("Self-Guide", ["jdatamunch_guide"]),
     ]
@@ -1648,6 +1680,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 dataset=arguments.get("dataset"),
                 set_weights=arguments.get("set_weights"),
                 reset=arguments.get("reset", False),
+                storage_path=storage_path,
+            )
+        elif name == "check_embedding_drift":
+            result = await asyncio.to_thread(
+                check_embedding_drift,
+                force=arguments.get("force", False),
+                threshold=arguments.get("threshold", 0.05),
                 storage_path=storage_path,
             )
         elif name == "jdatamunch_guide":

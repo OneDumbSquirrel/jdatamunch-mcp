@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.15.0] - 2026-06-16 - `check_embedding_drift`: detect silent embedding-provider drift
+
+Column embeddings power semantic `search_data` and `find_similar_columns`. If
+the embedding provider's model changes underneath a stored index (a model
+revision bump, a reweight under the same name, a swapped local
+sentence-transformers model), the vectors saved at index time stop matching what
+the live query encoder produces and semantic ranking quietly degrades. The new
+`check_embedding_drift` tool catches that, closing a sibling-parity gap
+(jcodemunch-mcp and jdocmunch-mcp both ship one).
+
+- New `embed_drift.py` pins a 16-string **canary** — deterministic strings
+  spanning tabular / column semantics (identifiers, money, dates, geo,
+  categories, free text), tailored to the domain jData embeds rather than code
+  tokens — embedded with the active provider and stored in
+  `<index_path>/embed_canary.json` (`{provider, model, dim, captured_at,
+  strings, vectors}`).
+- New `check_embedding_drift` tool: `force=true` re-embeds and re-pins the
+  baseline; otherwise it recomputes the canary and reports `max_drift` /
+  `mean_drift` / per-canary cosine, raising `alarm` when the worst canary drifts
+  past `threshold` (cosine distance, default 0.05). A provider swap is reported
+  even when the cosine comparison still runs.
+- Reuses jData's own `embeddings.detect_provider` / `embed_texts` /
+  `cosine_similarity` so the canary never drifts from the live encoder.
+
+Tool count 36 -> 37. 9 new tests (`tests/test_v1_15_0.py`).
+
 ## [1.14.0] - 2026-06-16 - `tune_weights`: tunable search_data ranking weights
 
 `search_data` ranks columns with a small weight vector (name / value / type
