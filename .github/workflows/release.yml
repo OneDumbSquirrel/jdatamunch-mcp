@@ -31,7 +31,11 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Tag + GitHub release on version bump
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Build wheel + sdist and release on version bump
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -52,6 +56,13 @@ jobs:
             exit 0
           fi
 
+          # Build the wheel + sdist so the release carries installable assets.
+          # The console one-click installer reads the latest release's .whl, so
+          # an asset-less release breaks it (v1.15.0/v1.16.0 shipped bare and the
+          # installer failed with "latest release has no .whl asset to install").
+          python -m pip install --upgrade build
+          python -m build
+
           SUBJ=$(git log -1 --format=%s)
           NOTES=$(git log -1 --format=%B \
                   | sed -E '/^Co-Authored-By:/d; /Generated with \[Claude Code\]/d; /^[[:space:]]*$/d' \
@@ -59,5 +70,6 @@ jobs:
           [ -z "${NOTES:-}" ] && NOTES="$SUBJ"
 
           gh release create "$TAG" --repo "$REPO" --target "$SHA" \
-            --title "$SUBJ" --notes "$NOTES"
-          echo "Created release $TAG for $SHA"
+            --title "$SUBJ" --notes "$NOTES" \
+            dist/*.whl dist/*.tar.gz
+          echo "Created release $TAG for $SHA with wheel + sdist"

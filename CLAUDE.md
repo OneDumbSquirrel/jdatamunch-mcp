@@ -80,7 +80,7 @@ src/jdatamunch_mcp/
 
 ## Releasing
 - **Tests** (`.github/workflows/test.yml`): matrix ubuntu+windows x py3.10-3.13 on push/PR to master; pytest + sdist sensitive-path check.
-- **Release** (`.github/workflows/release.yml`, added v1.16.0): on every push to master, *after Tests passes*, auto-tags + creates a GitHub release when `pyproject.toml`'s version has no release yet. No-op for docs-only / non-bump pushes. Gated via `workflow_run` + `conclusion == 'success'` so a red commit never gets tagged. **Don't hand-tag on a version bump** — the workflow does it (hand-creating a release first just makes the workflow no-op, which is fine).
+- **Release** (`.github/workflows/release.yml`, added v1.16.0): on every push to master, *after Tests passes*, auto-tags + creates a GitHub release when `pyproject.toml`'s version has no release yet. **Builds the wheel + sdist (`python -m build`) and attaches both to the release** — the console one-click installer reads the latest release's `.whl`, so a release MUST carry it. No-op for docs-only / non-bump pushes. Gated via `workflow_run` + `conclusion == 'success'` so a red commit never gets tagged. **Don't hand-tag on a version bump** — the workflow does it (hand-creating a release first just makes the workflow no-op, which is fine). (Asset-attaching added 2026-06-28 after v1.15.0/v1.16.0 shipped bare and broke the console installer; v1.16.0's wheel was backfilled by hand.)
 - **PyPI is still manual**: `python -m build` + `twine upload dist/*` from a machine with `.pypirc`. CI has no PyPI credential. To automate, add a publish job using PyPI Trusted Publishing (OIDC, no stored secret) once the publisher is configured on pypi.org.
 
 ## Benchmarks
