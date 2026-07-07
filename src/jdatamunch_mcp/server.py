@@ -10,7 +10,7 @@ import traceback
 from typing import Optional
 
 from mcp.server import Server
-from mcp.types import Tool, TextContent, Resource
+from mcp.types import Tool, ToolAnnotations, TextContent, Resource
 
 from .tools.index_local import index_local
 from .tools.list_datasets import list_datasets
@@ -133,10 +133,53 @@ def _filter_tools(tools: list[Tool]) -> list[Tool]:
     return tools
 
 
+# --- MCP read-only annotations (suite parity with jcodemunch PR #361) --------
+# MCP clients that gate execution (Claude Code plan mode) prompt for approval on
+# every tool they cannot prove is read-only. jData is read-only by charter apart
+# from the handful of tools that index / mutate / delete a dataset, so annotate
+# each tool with ToolAnnotations(readOnlyHint=...): query tools run silently,
+# the write-set still prompts. Any tool that can mutate persistent state (an
+# index, dataset, embedding store, tuning file, or drift canary) under ANY
+# argument is non-read-only — biased conservative, since mislabeling a writer as
+# read-only is the harmful direction.
+_NON_READONLY_TOOLS: frozenset[str] = frozenset({
+    "index_local",
+    "index_repo",
+    "summarize_dataset",
+    "delete_dataset",
+    "embed_dataset",
+    "ingest_sql_log",
+    "tune_weights",          # inspect reads; set/reset writes ranking_tuning.json
+    "check_embedding_drift",  # reports by default; force=true re-pins the canary
+})
+
+
+def _apply_readonly_annotations(tools: list[Tool]) -> list[Tool]:
+    """Attach ToolAnnotations(readOnlyHint=...) to any tool lacking annotations.
+
+    Read tools (readOnlyHint=True) run silently in Claude Code plan mode; the
+    write-set (_NON_READONLY_TOOLS) is marked False so those still prompt. Tools
+    that already carry annotations are left untouched. Returns a new list; input
+    Tool objects are copied (model_copy) rather than mutated.
+    """
+    annotated: list[Tool] = []
+    for tool in tools:
+        if tool.annotations is None:
+            tool = tool.model_copy(
+                update={
+                    "annotations": ToolAnnotations(
+                        readOnlyHint=tool.name not in _NON_READONLY_TOOLS
+                    )
+                }
+            )
+        annotated.append(tool)
+    return annotated
+
+
 @server.list_tools()
 async def list_tools() -> list[Tool]:
     """List all available tools."""
-    return _filter_tools(_all_tools())
+    return _apply_readonly_annotations(_filter_tools(_all_tools()))
 
 
 def _all_tools() -> list[Tool]:

@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.17.0] - 2026-07-07 - MCP readOnlyHint annotations (suite parity with jcodemunch PR #361)
+
+### Added
+
+- **Every tool advertises `ToolAnnotations(readOnlyHint=...)`.** MCP clients that
+  gate execution (Claude Code plan mode) prompted for approval on every jData
+  call because tools carried no annotations. Read tools are now
+  `readOnlyHint=True` (plan mode runs them silently) and the write-set is
+  `False`. Applied at the `list_tools` chokepoint via a non-mutating
+  `model_copy`. The write-set (`index_local`, `index_repo`, `summarize_dataset`,
+  `delete_dataset`, `embed_dataset`, `ingest_sql_log`, `tune_weights`,
+  `check_embedding_drift`) is any tool that can mutate persistent state under any
+  argument — biased conservative, since mislabeling a writer as read-only is the
+  harmful direction. Suite parity with jcodemunch-mcp (PR #361) and
+  jdocmunch-mcp. Additive, 1.x-compatible (new `tools/list` field only). Tests:
+  `tests/test_v1_17_0.py` (4).
+
 ## [1.16.0] - 2026-06-16 - `analyze_perf`: per-tool latency + cache-hit telemetry
 
 Completes the sibling-parity trio (jcodemunch-mcp and jdocmunch-mcp both ship
