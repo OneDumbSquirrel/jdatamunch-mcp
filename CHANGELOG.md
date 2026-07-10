@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.18.0] - 2026-07-10 - suite-parity retrieval verdict (`_meta.verdict` on search_data)
+
+### Added
+
+- **`search_data` now emits `_meta.verdict`** — the same agent-facing honesty
+  contract the sibling code and doc MCPs ship on their search tools. An empty
+  column search is positive, token-saving evidence: the index can attest "no
+  column matches this" instead of leaving the agent to reformulate. Taxonomy:
+  `ok` / `absent` / `degraded`.
+- **`degraded`** fires when semantic search is requested but the embedding
+  channel falls back to keyword-only, so absence is not proven. It takes
+  precedence over `absent`.
+- **`absent`** carries a `did_you_mean` list of column names containing a query
+  term, so a miss redirects the agent instead of repeating the same empty query.
+
+Honest divergence from the sibling search tools: jData scores are rank-normalized
+(top hit always 1.0), so there is no calibrated confidence signal — `search_data`
+emits no `low_confidence` state (it would be fabricated). Clean-room jData
+implementation (new top-level `verdict.py`); only the wire shape is shared — no
+cross-suite import. Additive and 1.x-compatible: `_meta.verdict` is a new key,
+every existing response field is unchanged, no `INDEX_VERSION` bump, inline
+compute. Tests: `tests/test_v1_18_0.py` (9).
+
 ## [1.17.0] - 2026-07-07 - MCP readOnlyHint annotations (suite parity with jcodemunch PR #361)
 
 ### Added

@@ -322,6 +322,18 @@ def search_data(
     if sem_scores:
         meta["semantic_enabled"] = True
 
+    # Suite-parity honesty verdict. degraded = semantic requested but the
+    # embedding channel fell back to keyword-only; absent = zero matches.
+    from ..verdict import build_verdict, suggest_columns
+    semantic_requested = bool(semantic or semantic_only)
+    meta["verdict"] = build_verdict(
+        result_count=len(results),
+        semantic_requested=semantic_requested,
+        semantic_available=bool(sem_scores),
+        lexical_used=not semantic_only,
+        did_you_mean=suggest_columns(query, idx.columns) if not results else None,
+    )
+
     return {
         "result": results,
         "_meta": meta,
