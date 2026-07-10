@@ -581,6 +581,28 @@ Or if you prefer learning by doing: index a file, run `describe_dataset`, and lo
 That single call — 35 milliseconds, 3,849 tokens — tells you everything that would have cost you 111 million tokens to read raw.
 
 That's the whole idea...
+
+## License
+
+jDataMunch-MCP is released under the **jDataMunch-MCP Dual-Use License** — see
+[LICENSE](LICENSE) for the authoritative terms. It is **free for non-commercial
+use**; [commercial use requires a paid license](#commercial-licenses).
+
+Conditions on all uses:
+
+1. The above copyright notice and this permission notice must be retained in all
+   copies or substantial portions of the Software.
+
+2. Any modifications made to the Software must clearly indicate that they are
+   derived from the original work, and the name of the original author
+   (J. Gravelle) must remain intact. He's kinda full of himself.
+
+3. Redistributions of the Software in source code form must include a prominent
+   notice describing any modifications from the original version.
+
+The Software is provided "AS IS" without warranty of any kind. The full,
+controlling terms are in [LICENSE](LICENSE).
+
  <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=jgravelle/jdatamunch-mcp&type=date&theme=dark&legend=top-left" />
    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=jgravelle/jdatamunch-mcp&type=date&legend=top-left" />

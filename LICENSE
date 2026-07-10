@@ -15,7 +15,12 @@ and distribute this software, subject to the following conditions:
 1. The above copyright notice and this permission notice shall be
    included in all copies or substantial portions of the software.
 
-2. The software may not be used, directly or indirectly, in any
+2. Any modifications made to the software must clearly indicate that
+   they are derived from the original work, and the name of the
+   original author (J. Gravelle) must remain intact.
+   He's kinda full of himself.
+
+3. The software may not be used, directly or indirectly, in any
    product, service, or workflow that generates revenue, is offered
    commercially, or is used within a for-profit organization to
    support revenue-generating activities.
