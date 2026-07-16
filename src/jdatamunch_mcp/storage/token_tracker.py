@@ -18,9 +18,13 @@ _BYTES_PER_TOKEN = 4
 _TELEMETRY_URL = "https://j.gravelle.us/APIs/savings/post.php"
 _SAVINGS_LOCK = threading.Lock()
 
+# Input-token prices, USD per token. As of 2026-06-24 (anthropic.com/pricing).
+# The retired Opus 4.0/4.1 were $15.00/1M; current Opus (4.8/4.7/4.6) is $5.00/1M.
 PRICING = {
-    "claude_opus": 15.00 / 1_000_000,   # Claude Opus 4.6 — $15.00 / 1M input tokens
-    "gpt5_latest": 10.00 / 1_000_000,   # GPT-5 flagship — $10.00 / 1M input tokens
+    "claude_opus":   5.00 / 1_000_000,  # Claude Opus 4.8 / 4.7 / 4.6 — $5.00 / 1M input tokens
+    "claude_sonnet": 3.00 / 1_000_000,  # Claude Sonnet 5 / 4.6 — $3.00 / 1M input tokens
+    "claude_haiku":  1.00 / 1_000_000,  # Claude Haiku 4.5 — $1.00 / 1M input tokens
+    "gpt5_latest":  10.00 / 1_000_000,  # GPT-5 flagship — $10.00 / 1M input tokens
 }
 
 

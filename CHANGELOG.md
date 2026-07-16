@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.19.0] - 2026-07-16 - cost_avoided corrected to current Opus pricing (was overstating 3x)
+
+`storage/token_tracker.PRICING` carried a stale Opus input rate of $15/MTok
+(the retired Opus 4.0/4.1 price). `PRICING` feeds `cost_avoided()`, emitted in
+`_meta` on nearly every tool response (describe_dataset, get_rows, sample_rows,
+aggregate, join_datasets, get_session_stats, describe_column, get_data_hotspots),
+so every response's Opus dollar figure was roughly 3x too high. Current Opus
+(4.8/4.7/4.6) is $5/MTok.
+
+### Fixed
+- `claude_opus` rate corrected $15 -> $5 per MTok (comment now cites the dated
+  source, anthropic.com/pricing 2026-06-24).
+
+### Added
+- `claude_sonnet` ($3/MTok) and `claude_haiku` ($1/MTok) entries, so
+  `cost_avoided` / `total_cost_avoided` show the full current model set (parity
+  with the sibling code MCP's price table). Additive keys only; the existing
+  `claude_opus` and `gpt5_latest` keys are unchanged in name, so the wire shape
+  stays 1.x-compatible (new keys additive, plus a value correction).
+
+Present-value note: `cost_avoided` values the tokens saved on THIS call at
+current input pricing; it does not touch the public token counter (which stores
+tokens and values them at display time). No INDEX_VERSION bump, no tool
+add/rename. Suite parity: jcm v1.108.130 (receipt table) + jdoc v1.97.0 (same
+token_tracker fix).
+
 ## [1.18.0] - 2026-07-10 - suite-parity retrieval verdict (`_meta.verdict` on search_data)
 
 ### Added
