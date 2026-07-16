@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.19.1] - 2026-07-16 - docs only
+
+Documentation wording only. No code, wire-format, or behavior change from 1.19.0.
+
 ## [1.19.0] - 2026-07-16 - update model price constants to current Anthropic pricing
 
 Updates the model input-price constants used by the `cost_avoided` dollar
